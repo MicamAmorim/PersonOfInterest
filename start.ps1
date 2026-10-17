@@ -9,9 +9,9 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
 $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
-$PipExe = Join-Path $Root ".venv\Scripts\pip.exe"
 $Go2rtcExe = Join-Path $Root "bin\go2rtc.exe"
 $RuntimeConfig = Join-Path $Root "data\go2rtc.runtime.yaml"
+$Requirements = Join-Path $Root "backend\requirements.txt"
 
 if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
@@ -21,25 +21,23 @@ Write-Host "Verificando dependencias da V2..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $PythonExe -c "import cv2, numpy" *> $null
+    & $PythonExe -c "import cv2, numpy, sys; ok = hasattr(cv2, 'HOGDescriptor') and int(cv2.__version__.split('.')[0]) < 5; sys.exit(0 if ok else 2)" *> $null
     $visionDepsExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $oldErrorActionPreference
 }
 
 if ($visionDepsExitCode -ne 0) {
-    Write-Host "Dependencias de visao nao encontradas. Instalando..." -ForegroundColor Yellow
-    & $PythonExe -m pip install -r (Join-Path $Root "backend\requirements.txt")
+    Write-Host "Ajustando dependencias de visao (OpenCV 4.x)..." -ForegroundColor Yellow
+    & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
         throw "Falha ao instalar as dependencias da V2."
     }
+}
 
-    & $PythonExe -c "import cv2, numpy; print('OpenCV', cv2.__version__, '| NumPy', numpy.__version__)"
-    if ($LASTEXITCODE -ne 0) {
-        throw "As dependencias foram instaladas, mas OpenCV/NumPy ainda nao puderam ser importados."
-    }
-} else {
-    Write-Host "OpenCV e NumPy OK." -ForegroundColor DarkGray
+& $PythonExe -c "import cv2, numpy, sys; assert hasattr(cv2, 'HOGDescriptor'), 'OpenCV sem HOGDescriptor'; assert int(cv2.__version__.split('.')[0]) < 5, 'OpenCV 5 nao e suportado pelo detector atual'; print('OpenCV', cv2.__version__, '| NumPy', numpy.__version__)"
+if ($LASTEXITCODE -ne 0) {
+    throw "OpenCV/NumPy nao estao compativeis com o detector da V2."
 }
 
 $env:DATA_DIR = Join-Path $Root "data"
@@ -63,7 +61,8 @@ log:
 
 Write-Host "=== PersonOfInterest V2 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
-$Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", $RuntimeConfig) -WorkingDirectory $Root -PassThru -NoNewWindow
+# Use a relative config path so Windows usernames/paths containing spaces do not get split by Start-Process.
+$Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
 $Backend = $null
 try {
