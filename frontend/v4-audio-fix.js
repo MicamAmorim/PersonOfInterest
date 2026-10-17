@@ -10,11 +10,54 @@
     ? updateAudioControls
     : null;
 
+  function muteMediaElement(element) {
+    try { element.muted = true; } catch (_) {}
+    try { element.volume = 0; } catch (_) {}
+    if (element.tagName === 'AUDIO') {
+      try { element.pause(); } catch (_) {}
+    }
+  }
+
+  function muteDeep(root) {
+    if (!root?.querySelectorAll) return;
+    root.querySelectorAll('audio,video').forEach(muteMediaElement);
+    root.querySelectorAll('*').forEach(element => {
+      try {
+        if (element.shadowRoot) muteDeep(element.shadowRoot);
+      } catch (_) {}
+    });
+  }
+
+  function hardMuteCurrentViewer() {
+    const frame = document.getElementById('viewerFrame');
+    if (!frame) return;
+
+    // Same-origin synchronous mute first: this closes the acoustic loop before
+    // the old iframe has time to unload and before the new page asks for mic.
+    try {
+      const doc = frame.contentDocument;
+      muteDeep(doc);
+      const remoteAudio = doc?.getElementById('remoteAudio');
+      if (remoteAudio) {
+        remoteAudio.muted = true;
+        remoteAudio.volume = 0;
+        try { remoteAudio.pause(); } catch (_) {}
+      }
+      const nested = doc?.getElementById('videoFrame');
+      if (nested?.contentDocument) muteDeep(nested.contentDocument);
+    } catch (_) {}
+
+    // Message fallback lets camera-webrtc disable receiver tracks as well.
+    try {
+      frame.contentWindow?.postMessage({ source: 'personofinterest-parent', type: 'hard-mute-audio' }, location.origin);
+    } catch (_) {}
+  }
+
   function renderHalfDuplexAudioState() {
     if (baseUpdateAudioControls) baseUpdateAudioControls();
     if (!talking) {
       talk.textContent = '🎙 Segure p/ falar';
-      talk.title = 'Segure enquanto fala. O áudio da câmera é silenciado temporariamente para evitar retroalimentação.';
+      talk.title = 'Segure enquanto fala. O áudio da câmera é cortado antes de abrir o microfone para evitar retroalimentação.';
       if (state.viewer?.speakerOn) {
         const status = document.getElementById('audioStatus');
         if (status) status.textContent = 'Áudio da câmera ativo · segure o microfone para falar';
@@ -23,12 +66,10 @@
       talk.textContent = '🎤 Falando…';
       talk.title = 'Solte para parar de falar';
       const status = document.getElementById('audioStatus');
-      if (status) status.textContent = 'Falando para a câmera · escuta suspensa para evitar eco';
+      if (status) status.textContent = 'Falando para a câmera · toda escuta local suspensa';
     }
   }
 
-  // Override the global renderer so every viewer reload preserves the
-  // push-to-talk wording/state introduced here.
   if (baseUpdateAudioControls) updateAudioControls = renderHalfDuplexAudioState;
 
   function canStartTalk() {
@@ -49,6 +90,11 @@
     event?.preventDefault?.();
     event?.stopImmediatePropagation?.();
 
+    // Cut every currently playing camera-audio path synchronously, before
+    // changing iframe URL / opening getUserMedia. This is the key anti-feedback
+    // guarantee for push-to-talk.
+    hardMuteCurrentViewer();
+
     talking = true;
     resumeSpeaker = Boolean(state.viewer.speakerOn);
     state.viewer.speakerOn = false;
@@ -68,6 +114,9 @@
     event?.preventDefault?.();
     event?.stopImmediatePropagation?.();
 
+    // Stop outgoing talkback first. Listening is restored only by loading the
+    // non-microphone viewer after micOn has been cleared.
+    hardMuteCurrentViewer();
     talking = false;
     state.viewer.micOn = false;
     state.viewer.speakerOn = resumeSpeaker;
@@ -95,7 +144,6 @@
   talk.addEventListener('lostpointercapture', () => stopTalk(), true);
   talk.addEventListener('contextmenu', event => event.preventDefault());
 
-  // Keyboard accessibility: hold Space/Enter just like holding the button.
   talk.addEventListener('keydown', event => {
     if (event.repeat || ![' ', 'Enter'].includes(event.key)) return;
     startTalk(event);
@@ -105,7 +153,6 @@
     stopTalk(event);
   }, true);
 
-  // Never leave the browser microphone transmitting if the tab/view loses focus.
   window.addEventListener('blur', () => stopTalk());
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stopTalk();
