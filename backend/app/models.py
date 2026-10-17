@@ -109,3 +109,28 @@ class PTZMoveRequest(BaseModel):
     tilt: float = Field(ge=-1.0, le=1.0)
     speed: float = Field(default=0.55, ge=0.05, le=1.0)
     duration: float = Field(default=0.35, ge=0.1, le=2.0)
+
+
+class EventBulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+    @field_validator("ids")
+    @classmethod
+    def unique_ids(cls, value: list[int]) -> list[int]:
+        cleaned = sorted({int(item) for item in value if int(item) > 0})
+        if not cleaned:
+            raise ValueError("Selecione ao menos um evento")
+        return cleaned
+
+
+class PersonCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class EventPersonAssignRequest(BaseModel):
+    person_id: int | None = Field(default=None, ge=1)
