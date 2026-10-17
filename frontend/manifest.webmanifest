@@ -1,0 +1,17 @@
+{
+  "name": "PersonOfInterest",
+  "short_name": "POI",
+  "description": "Local-first IP camera dashboard for PersonOfInterest.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090b10",
+  "theme_color": "#11151d",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

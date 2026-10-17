@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#11151d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>PersonOfInterest</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="/icon.svg" alt="" />
+        <div><strong>PersonOfInterest</strong><span>Local surveillance</span></div>
+      </div>
+      <nav>
+        <button class="nav-item active" data-view="dashboard"><span>▦</span> Visão geral</button>
+        <button class="nav-item" data-view="cameras"><span>◉</span> Câmeras</button>
+        <button class="nav-item" data-view="settings"><span>⚙</span> Sistema</button>
+      </nav>
+      <div class="sidebar-status">
+        <span class="status-dot" id="systemDot"></span>
+        <div><strong id="systemStatus">Verificando…</strong><span id="systemDetail">backend / go2rtc</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">NVR LOCAL · V1</p>
+          <h1 id="pageTitle">Visão geral</h1>
+        </div>
+        <div class="top-actions">
+          <button class="button ghost" id="refreshBtn">↻ Atualizar</button>
+          <button class="button primary" id="addCameraBtn">＋ Nova câmera</button>
+        </div>
+      </header>
+
+      <section id="dashboardView" class="view active">
+        <div class="stats-grid">
+          <article class="stat-card"><span>Câmeras</span><strong id="cameraCount">0</strong><small>cadastradas</small></article>
+          <article class="stat-card"><span>Ativas</span><strong id="activeCount">0</strong><small>habilitadas</small></article>
+          <article class="stat-card"><span>Streams</span><strong id="syncedCount">0</strong><small>sincronizados</small></article>
+          <article class="stat-card"><span>Reconhecimento</span><strong>—</strong><small>planejado para V2/V3</small></article>
+        </div>
+        <div class="section-heading">
+          <div><p class="eyebrow">AO VIVO</p><h2>Câmeras</h2></div>
+          <span class="muted">Clique em uma câmera para ampliar</span>
+        </div>
+        <div id="cameraGrid" class="camera-grid"></div>
+        <div id="emptyState" class="empty-state hidden">
+          <div class="empty-icon">◉</div>
+          <h3>Nenhuma câmera cadastrada</h3>
+          <p>Adicione a primeira URL RTSP. As credenciais ficam somente no banco local.</p>
+          <button class="button primary" id="emptyAddBtn">Adicionar câmera</button>
+        </div>
+      </section>
+
+      <section id="camerasView" class="view">
+        <div class="panel">
+          <div class="panel-header"><div><p class="eyebrow">GERENCIAMENTO</p><h2>Câmeras cadastradas</h2></div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nome</th><th>Local</th><th>RTSP</th><th>Status</th><th></th></tr></thead>
+              <tbody id="cameraTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="settingsView" class="view">
+        <div class="settings-grid">
+          <article class="panel info-panel">
+            <p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2>
+            <div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div>
+            <div class="info-row"><span>Streaming</span><strong>go2rtc</strong></div>
+            <div class="info-row"><span>Gateway</span><strong>Caddy</strong></div>
+            <div class="info-row"><span>Cliente</span><strong>PWA</strong></div>
+          </article>
+          <article class="panel info-panel">
+            <p class="eyebrow">SEGURANÇA</p><h2>Acesso</h2>
+            <p class="muted paragraph">Esta V1 foi feita para rede local ou tailnet. Não exponha a porta do sistema diretamente à internet. Para acesso externo, prefira Tailscale Serve.</p>
+            <button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="cameraDialog" class="modal">
+    <form method="dialog" id="cameraForm">
+      <div class="modal-header"><div><p class="eyebrow">CONFIGURAÇÃO</p><h2 id="cameraDialogTitle">Nova câmera</h2></div><button class="icon-button" value="cancel" type="button" data-close>×</button></div>
+      <input type="hidden" id="cameraId" />
+      <label>Nome<input id="cameraName" maxlength="80" required placeholder="Ex.: Portão" /></label>
+      <label>Local<input id="cameraLocation" maxlength="120" placeholder="Ex.: Entrada principal" /></label>
+      <label>URL RTSP<input id="cameraRtsp" type="text" autocomplete="off" spellcheck="false" placeholder="rtsp://usuario:senha@192.168.1.50:554/stream" /></label>
+      <p class="field-help" id="rtspHelp">A URL será armazenada apenas no SQLite local e enviada internamente ao go2rtc.</p>
+      <label class="switch-row"><span><strong>Câmera habilitada</strong><small>Sincronizar e exibir o stream</small></span><input id="cameraEnabled" type="checkbox" checked /></label>
+      <div id="formError" class="form-error hidden"></div>
+      <div class="modal-actions"><button type="button" class="button ghost" data-close>Cancelar</button><button type="submit" class="button primary" id="saveCameraBtn">Salvar câmera</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="viewerDialog" class="viewer-modal">
+    <div class="viewer-header"><div><p class="eyebrow">AO VIVO</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div><button class="icon-button" type="button" data-viewer-close>×</button></div>
+    <div class="viewer-frame-wrap"><iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe></div>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

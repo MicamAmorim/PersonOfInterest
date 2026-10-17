@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /app/data
+      GO2RTC_API_URL: ${GO2RTC_API_URL:-http://go2rtc:1984}
+      TZ: ${TZ:-America/Bahia}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - go2rtc
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/Bahia}
+    volumes:
+      - ./infra/go2rtc:/config
+    ports:
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
+
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${POI_PORT:-8080}:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+      - go2rtc

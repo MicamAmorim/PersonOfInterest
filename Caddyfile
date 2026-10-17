@@ -1,0 +1,13 @@
+:8080 {
+    encode zstd gzip
+
+    # Same-origin proxy for go2rtc's viewer, JS assets, WebSocket signaling and media fallbacks.
+    # The /go2rtc prefix is stripped before forwarding.
+    handle_path /go2rtc/* {
+        reverse_proxy go2rtc:1984
+    }
+
+    handle {
+        reverse_proxy backend:8000
+    }
+}
