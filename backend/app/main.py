@@ -4,20 +4,21 @@ import asyncio
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import discovery, go2rtc
-from .config import APP_NAME, APP_VERSION, DB_PATH, FRONTEND_DIR, GO2RTC_BROWSER_BASE
+from . import discovery, go2rtc, ptz
+from .config import APP_NAME, APP_VERSION, DB_PATH, EVENTS_DIR, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
-from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest
+from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest, PTZMoveRequest, VisionFollowRequest
+from .vision import manager as vision_manager
 
 
 def mask_rtsp_url(raw: str) -> tuple[str, bool]:
-    """Return a credential-safe URL representation for API responses."""
     try:
         parsed = urlsplit(raw)
         has_credentials = parsed.username is not None or parsed.password is not None
@@ -72,12 +73,14 @@ async def sync_camera(camera_id: int) -> CameraOut:
     row = get_camera_row(camera_id)
     if not row["enabled"]:
         await asyncio.to_thread(go2rtc.delete_stream, row["stream_name"])
+        vision_manager.stop_camera(camera_id)
         set_sync_state(camera_id, "disabled")
         return camera_row_to_out(get_camera_row(camera_id))
 
     result = await asyncio.to_thread(go2rtc.upsert_stream, row["stream_name"], row["rtsp_url"])
     if result.ok:
         set_sync_state(camera_id, "ok")
+        vision_manager.start_camera(camera_id, row["rtsp_url"], row["name"])
     else:
         set_sync_state(camera_id, "error", result.error)
     return camera_row_to_out(get_camera_row(camera_id))
@@ -93,7 +96,10 @@ async def lifespan(_: FastAPI):
             await sync_camera(camera_id)
         except Exception:
             pass
-    yield
+    try:
+        yield
+    finally:
+        vision_manager.stop_all()
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
@@ -110,6 +116,8 @@ async def health() -> dict:
         "database": "ok" if db_ok else "missing",
         "go2rtc": "ok" if rtc.ok else "unavailable",
         "go2rtc_error": rtc.error,
+        "vision": "ok" if vision_manager.available else "unavailable",
+        "vision_error": vision_manager.import_error,
     }
 
 
@@ -117,8 +125,7 @@ async def health() -> dict:
 async def discover_cameras() -> dict:
     with connection() as conn:
         urls = [r["rtsp_url"] for r in conn.execute("SELECT rtsp_url FROM cameras").fetchall()]
-    existing_hosts = discovery.hosts_from_rtsp_urls(urls)
-    return await discovery.scan_local_network(existing_hosts)
+    return await discovery.scan_local_network(discovery.hosts_from_rtsp_urls(urls))
 
 
 @app.post("/api/discovery/probe")
@@ -169,8 +176,12 @@ async def create_camera(payload: CameraCreate) -> CameraOut:
             """,
             (payload.name, payload.location, payload.rtsp_url, stream_name, int(payload.enabled), now, now),
         )
-        conn.commit()
         camera_id = int(cursor.lastrowid)
+        conn.execute(
+            "INSERT OR IGNORE INTO camera_runtime_settings(camera_id, updated_at) VALUES (?, ?)",
+            (camera_id, now),
+        )
+        conn.commit()
     return await sync_camera(camera_id)
 
 
@@ -207,20 +218,103 @@ async def resync_camera(camera_id: int) -> CameraOut:
 async def sync_all_cameras() -> dict:
     with connection() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM cameras ORDER BY id").fetchall()]
-    results = []
-    for camera_id in ids:
-        results.append((await sync_camera(camera_id)).model_dump())
+    results = [(await sync_camera(camera_id)).model_dump() for camera_id in ids]
     return {"count": len(results), "cameras": results}
 
 
 @app.delete("/api/cameras/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_camera(camera_id: int) -> Response:
     row = get_camera_row(camera_id)
+    vision_manager.stop_camera(camera_id)
     await asyncio.to_thread(go2rtc.delete_stream, row["stream_name"])
     with connection() as conn:
         conn.execute("DELETE FROM cameras WHERE id = ?", (camera_id,))
         conn.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/vision/cameras/{camera_id}/state")
+def vision_state(camera_id: int) -> dict:
+    get_camera_row(camera_id)
+    return vision_manager.state(camera_id)
+
+
+@app.post("/api/vision/cameras/{camera_id}/follow")
+def set_follow(camera_id: int, payload: VisionFollowRequest) -> dict:
+    get_camera_row(camera_id)
+    return vision_manager.set_auto_follow(camera_id, payload.enabled, payload.track_id)
+
+
+@app.get("/api/cameras/{camera_id}/ptz/status")
+async def ptz_status(camera_id: int) -> dict:
+    row = get_camera_row(camera_id)
+    return await asyncio.to_thread(ptz.probe, row["rtsp_url"])
+
+
+@app.post("/api/cameras/{camera_id}/ptz/move")
+async def ptz_move(camera_id: int, payload: PTZMoveRequest) -> dict:
+    row = get_camera_row(camera_id)
+    try:
+        await asyncio.to_thread(ptz.pulse, row["rtsp_url"], payload.pan, payload.tilt, payload.speed, payload.duration)
+        vision_manager.set_ptz_error(camera_id, None)
+        return {"ok": True}
+    except Exception as exc:
+        vision_manager.set_ptz_error(camera_id, str(exc))
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/cameras/{camera_id}/ptz/stop")
+async def ptz_stop(camera_id: int) -> dict:
+    row = get_camera_row(camera_id)
+    try:
+        await asyncio.to_thread(ptz.stop, row["rtsp_url"])
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/events")
+def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=1, le=500)) -> list[dict]:
+    sql = """
+        SELECT e.*, c.name AS camera_name, c.location AS camera_location
+        FROM events e JOIN cameras c ON c.id = e.camera_id
+    """
+    params: list[object] = []
+    if camera_id is not None:
+        sql += " WHERE e.camera_id = ?"
+        params.append(camera_id)
+    sql += " ORDER BY e.created_at DESC LIMIT ?"
+    params.append(limit)
+    with connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "camera_id": row["camera_id"],
+            "camera_name": row["camera_name"],
+            "camera_location": row["camera_location"],
+            "track_id": row["track_id"],
+            "event_type": row["event_type"],
+            "has_face": bool(row["has_face"]),
+            "face_count": row["face_count"],
+            "confidence": row["confidence"],
+            "created_at": row["created_at"],
+            "snapshot_url": f"/api/events/{row['id']}/snapshot" if row["snapshot_path"] else None,
+        }
+        for row in rows
+    ]
+
+
+@app.get("/api/events/{event_id}/snapshot")
+def event_snapshot(event_id: int) -> FileResponse:
+    with connection() as conn:
+        row = conn.execute("SELECT snapshot_path FROM events WHERE id = ?", (event_id,)).fetchone()
+    if row is None or not row["snapshot_path"]:
+        raise HTTPException(status_code=404, detail="Snapshot não encontrado")
+    path = (EVENTS_DIR / row["snapshot_path"]).resolve()
+    if EVENTS_DIR.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="Snapshot não encontrado")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
 
 if FRONTEND_DIR.exists():
@@ -234,11 +328,7 @@ if FRONTEND_DIR.exists():
 
     @app.get("/sw.js", include_in_schema=False)
     def service_worker() -> FileResponse:
-        return FileResponse(
-            FRONTEND_DIR / "sw.js",
-            media_type="application/javascript",
-            headers={"Service-Worker-Allowed": "/"},
-        )
+        return FileResponse(FRONTEND_DIR / "sw.js", media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
 
     @app.get("/icon.svg", include_in_schema=False)
     def icon() -> FileResponse:
