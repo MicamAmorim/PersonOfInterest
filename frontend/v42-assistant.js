@@ -17,9 +17,9 @@
     panel.id = 'assistantPanel';
     panel.className = 'panel info-panel';
     panel.innerHTML = `
-      <p class="eyebrow">V4.4 · TONHO</p>
+      <p class="eyebrow">V4.5 · TONHO CONVERSA</p>
       <h2>Assistente</h2>
-      <p class="muted paragraph">Cumprimenta pessoas usando a identidade local. Face/manual é confirmação; corpo continua sempre <strong>provável</strong>. Opcionalmente, a câmera também pode ouvir a frase <strong>“Oi, Tonho!”</strong>.</p>
+      <p class="muted paragraph">Cumprimenta pessoas usando a identidade local. Face/manual é confirmação; corpo continua sempre <strong>provável</strong>. Com <strong>“Oi, Tonho!”</strong>, abre uma pequena janela de conversa para perguntas simples sobre esta câmera.</p>
 
       <div class="assistant-active-block">
         <div class="assistant-active-heading"><strong>Assistentes ativos</strong><span id="assistantActiveCount" class="muted">0</span></div>
@@ -48,7 +48,7 @@
         <input id="assistantEnabled" type="checkbox" />
       </label>
       <label class="switch-row assistant-switch tonho-switch">
-        <span><strong>Escutar “Oi, Tonho!”</strong><small>Transcrição local pelo Whisper. Ao reconhecer a frase, responde “Oi!” e usa a identidade recente daquela câmera quando disponível.</small></span>
+        <span><strong>Escutar “Oi, Tonho!”</strong><small>Transcrição local pelo Whisper. Pode responder na mesma frase ou aguardar uma pergunta curta depois de “Pode falar”.</small></span>
         <input id="assistantWakeEnabled" type="checkbox" />
       </label>
       <p id="assistantWakeStatusText" class="field-help">Tonho: aguardando configuração…</p>
@@ -58,6 +58,7 @@
         <button class="button ghost" type="button" id="assistantTestBtn">▶ Testar voz</button>
         <button class="button ghost" type="button" id="assistantRefreshBtn">↻ Atualizar</button>
       </div>
+      <p class="field-help"><strong>Exemplos do Tonho:</strong> “Quem sou eu?”, “Quem está aqui?”, “Quem passou aqui hoje?”, “Quando Andressa passou por aqui?”, “Quantas pessoas passaram hoje?”, “Tem alguém desconhecido?” e “Que horas são?”. Você também pode falar tudo de uma vez: “Oi, Tonho, quem passou aqui hoje?”.</p>
       <p class="field-help">Primeira aparição da pessoa em cada turno: Bom dia / Boa tarde / Boa noite. Depois, o assistente respeita o intervalo configurado. Uma face desconhecida de boa qualidade recebe “Oi, quem é?”.</p>`;
     grid.appendChild(panel);
 
@@ -140,10 +141,13 @@
     }
     const cameraState = wake.cameras?.[String(setting.camera_id)] || wake.cameras?.[setting.camera_id];
     const status = cameraState?.status || wake.status || 'iniciando';
+    const conversation = Number(wake.conversation_seconds || 8);
+    const waiting = cameraState?.conversation_open ? ` · aguardando pergunta por ${conversation}s` : '';
+    const intent = cameraState?.last_intent ? ` · comando: ${cameraState.last_intent}` : '';
     const heard = cameraState?.last_transcript ? ` · ouvi: “${cameraState.last_transcript}”` : '';
     const answer = cameraState?.last_response ? ` · respondi: “${cameraState.last_response}”` : '';
     const error = cameraState?.error ? ` · ${cameraState.error}` : '';
-    el.textContent = `Tonho: ${status} · frase “${wake.phrase || 'Oi, Tonho!'}” · Whisper ${wake.model || 'tiny'}${heard}${answer}${error}`;
+    el.textContent = `Tonho: ${status} · frase “${wake.phrase || 'Oi, Tonho!'}” · Whisper ${wake.model || 'tiny'} · janela ${conversation}s${waiting}${intent}${heard}${answer}${error}`;
   }
 
   function renderSelectedAssistant() {
@@ -224,7 +228,7 @@
       renderActiveAssistants();
       renderSelectedAssistant();
       if (!quiet) {
-        const wakeText = saved.wake_enabled ? ' Escuta “Oi, Tonho!” ativa.' : '';
+        const wakeText = saved.wake_enabled ? ' Escuta “Oi, Tonho!” e conversa curta ativas.' : '';
         toast(saved.enabled ? `Assistente ligado e configurações salvas.${wakeText}` : 'Assistente desligado e configurações salvas.');
       }
       setTimeout(loadAssistantSettings, 900);
