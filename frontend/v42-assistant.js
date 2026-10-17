@@ -83,7 +83,9 @@
     enabled.checked = Boolean(setting?.enabled);
     interval.value = String(setting?.interval_minutes || 30);
     voice.value = setting?.voice_gender || 'female';
-    timezone.value = setting?.timezone || browserTimezone();
+    timezone.value = setting?.updated_at
+      ? (setting.timezone || browserTimezone())
+      : browserTimezone();
 
     const status = document.getElementById('assistantStatusText');
     if (!status) return;
@@ -91,12 +93,12 @@
       status.textContent = 'Assistente: status indisponível.';
       return;
     }
-    const body = Math.round(Number(state.assistantStatus.body_probable_threshold || 0) * 100);
-    const unknown = Math.round(Number(state.assistantStatus.unknown_face_quality_threshold || 0) * 100);
+    const body = Number(state.assistantStatus.body_probable_threshold || 0).toFixed(2);
+    const unknown = Number(state.assistantStatus.unknown_face_quality_threshold || 0).toFixed(2);
     const last = state.assistantStatus.last_speech;
     const lastText = last?.text ? ` · última fala: “${last.text}”` : '';
     const error = state.assistantStatus.error ? ` · ${state.assistantStatus.error}` : '';
-    status.textContent = `Motor: ${state.assistantStatus.status} · corpo provável ≥ ${body}% · face desconhecida forte ≥ ${unknown}%${lastText}${error}`;
+    status.textContent = `Motor: ${state.assistantStatus.status} · limiar corporal ≥ ${body} · qualidade de face desconhecida ≥ ${unknown}${lastText}${error}`;
   }
 
   async function loadAssistantSettings() {
