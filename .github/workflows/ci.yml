@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main, v2-work, v3-v4-work]
+    branches: [main, v2-work, v3-v4-work, v3-v4-release]
   pull_request:
 
 jobs:
