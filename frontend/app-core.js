@@ -1,9 +1,18 @@
 const state = {
   cameras: [],
   events: [],
+  persons: [],
+  selectedEventIds: new Set(),
   view: 'dashboard',
   discovery: { devices: [], selected: null, verified: null },
-  viewer: { cameraId: null, selectedTrackId: null, pollTimer: null, ptzReady: false },
+  viewer: {
+    cameraId: null,
+    selectedTrackId: null,
+    pollTimer: null,
+    ptzReady: false,
+    speakerOn: false,
+    micOn: false,
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -18,6 +27,10 @@ function resolveViewerUrl(raw) {
   if (!raw || !raw.startsWith(prefix)) return raw;
   const path = raw.slice(prefix.length);
   return `http://${window.location.hostname}:1984/${path}`;
+}
+
+function go2rtcBase() {
+  return `http://${window.location.hostname}:1984`;
 }
 
 function toast(message, type = 'ok') {
@@ -65,11 +78,50 @@ async function loadCameras() {
   }
 }
 
+async function loadPersons() {
+  try {
+    state.persons = await api('/api/persons');
+    const select = $('#timelinePerson');
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = '<option value="">Todas as pessoas</option><option value="unknown">Não identificadas</option>' +
+      state.persons.map(person => `<option value="${person.id}">${escapeHtml(person.name)} (${person.event_count || 0})</option>`).join('');
+    if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  } catch (_) {
+    // Identity support is additive; timeline still works if this endpoint fails.
+  }
+}
+
+function timelineTimestamp(dateValue, timeValue, endOfDay = false) {
+  if (!dateValue) return null;
+  const time = timeValue || (endOfDay ? '23:59:59' : '00:00:00');
+  const local = new Date(`${dateValue}T${time}`);
+  return Number.isNaN(local.getTime()) ? null : local.toISOString();
+}
+
+function timelineParams() {
+  const params = new URLSearchParams();
+  const cameraId = $('#timelineCamera')?.value || '';
+  const person = $('#timelinePerson')?.value || '';
+  const fromTs = timelineTimestamp($('#timelineDateFrom')?.value || '', $('#timelineTimeFrom')?.value || '', false);
+  const toTs = timelineTimestamp($('#timelineDateTo')?.value || '', $('#timelineTimeTo')?.value || '', true);
+  const face = $('#timelineFace')?.value ?? '';
+  if (cameraId) params.set('camera_id', cameraId);
+  if (person === 'unknown') params.set('unidentified', 'true');
+  else if (person) params.set('person_id', person);
+  if (fromTs) params.set('from_ts', fromTs);
+  if (toTs) params.set('to_ts', toTs);
+  if (face !== '') params.set('has_face', face === '1' ? 'true' : 'false');
+  params.set('limit', '500');
+  return params;
+}
+
 async function loadEvents() {
   try {
-    const cameraId = $('#timelineCamera')?.value || '';
-    const suffix = cameraId ? `?camera_id=${encodeURIComponent(cameraId)}&limit=120` : '?limit=120';
-    state.events = await api(`/api/events${suffix}`);
+    const params = timelineParams();
+    state.events = await api(`/api/events?${params.toString()}`);
+    const visible = new Set(state.events.map(event => event.id));
+    state.selectedEventIds = new Set([...state.selectedEventIds].filter(id => visible.has(id)));
     if ($('#eventCount')) $('#eventCount').textContent = state.events.length;
     renderTimeline();
   } catch (error) {
@@ -120,22 +172,57 @@ function cameraRow(camera) {
   return `<tr><td><strong>${escapeHtml(camera.name)}</strong></td><td>${escapeHtml(camera.location || '—')}</td><td><code>${escapeHtml(camera.rtsp_url_display)}</code></td><td><span class="status-pill ${cls}" title="${escapeHtml(camera.sync_error || '')}">${label}</span></td><td><div class="table-actions"><button class="button ghost small" data-sync="${camera.id}">↻</button><button class="button ghost small" data-edit="${camera.id}">Editar</button><button class="button danger small" data-delete="${camera.id}">Excluir</button></div></td></tr>`;
 }
 
+function updateTimelineSelectionControls() {
+  const count = state.selectedEventIds.size;
+  const button = $('#timelineDeleteSelected');
+  if (button) {
+    button.disabled = count === 0;
+    button.textContent = `Excluir selecionados (${count})`;
+  }
+  const selectAll = $('#timelineSelectAll');
+  if (selectAll) {
+    const allSelected = state.events.length > 0 && state.events.every(event => state.selectedEventIds.has(event.id));
+    selectAll.textContent = allSelected ? 'Desmarcar todos' : 'Selecionar visíveis';
+  }
+}
+
 function renderTimeline() {
   if (!$('#timelineGrid')) return;
   if (!state.events.length) {
-    $('#timelineGrid').innerHTML = '<div class="empty-state compact"><div class="empty-icon">◷</div><h3>Nenhum evento ainda</h3><p>A timeline será preenchida quando a visão computacional detectar pessoas.</p></div>';
+    $('#timelineGrid').innerHTML = '<div class="empty-state compact"><div class="empty-icon">◷</div><h3>Nenhum evento encontrado</h3><p>Ajuste os filtros ou aguarde novas detecções.</p></div>';
+    updateTimelineSelectionControls();
     return;
   }
   $('#timelineGrid').innerHTML = state.events.map(event => {
     const date = new Date(event.created_at);
     const when = Number.isNaN(date.getTime()) ? event.created_at : date.toLocaleString('pt-BR');
-    return `<article class="event-card">
-      <div class="event-image">${event.snapshot_url ? `<img src="${event.snapshot_url}" loading="lazy" alt="Evento da câmera ${escapeHtml(event.camera_name)}">` : '<div class="event-placeholder">Sem imagem</div>'}<button class="event-delete" data-delete-event="${event.id}" title="Excluir este evento">×</button></div>
-      <div class="event-meta"><div><strong>${escapeHtml(event.camera_name)}</strong><span>${escapeHtml(event.camera_location || 'Sem local')}</span></div><span class="status-pill">Pessoa #${event.track_id ?? '—'}</span></div>
+    const checked = state.selectedEventIds.has(event.id) ? 'checked' : '';
+    const personLabel = event.person_name ? escapeHtml(event.person_name) : `Pessoa #${event.track_id ?? '—'}`;
+    const identityClass = event.person_name ? 'identified' : '';
+    return `<article class="event-card ${checked ? 'selected' : ''}" data-event-card="${event.id}">
+      <div class="event-image">
+        ${event.snapshot_url ? `<img src="${event.snapshot_url}" loading="lazy" alt="Evento da câmera ${escapeHtml(event.camera_name)}">` : '<div class="event-placeholder">Sem imagem</div>'}
+        <label class="event-select" title="Selecionar evento"><input type="checkbox" data-select-event="${event.id}" ${checked} /><span>✓</span></label>
+        <button class="event-delete" data-delete-event="${event.id}" title="Excluir este evento">×</button>
+      </div>
+      <div class="event-meta"><div><strong>${escapeHtml(event.camera_name)}</strong><span>${escapeHtml(event.camera_location || 'Sem local')}</span></div><span class="status-pill ${identityClass}">${personLabel}</span></div>
       <div class="event-foot"><span>${when}</span><span>${event.has_face ? `Face detectada${event.face_count > 1 ? ` (${event.face_count})` : ''}` : 'Sem face útil'}</span></div>
     </article>`;
   }).join('');
-  $$('[data-delete-event]').forEach(el => el.addEventListener('click', () => deleteTimelineEvent(Number(el.dataset.deleteEvent))));
+  $$('[data-delete-event]').forEach(el => el.addEventListener('click', (event) => { event.stopPropagation(); deleteTimelineEvent(Number(el.dataset.deleteEvent)); }));
+  $$('[data-select-event]').forEach(el => el.addEventListener('change', () => {
+    const id = Number(el.dataset.selectEvent);
+    if (el.checked) state.selectedEventIds.add(id); else state.selectedEventIds.delete(id);
+    renderTimeline();
+  }));
+  updateTimelineSelectionControls();
+}
+
+function toggleSelectAllTimelineEvents() {
+  const allSelected = state.events.length > 0 && state.events.every(event => state.selectedEventIds.has(event.id));
+  if (allSelected) state.events.forEach(event => state.selectedEventIds.delete(event.id));
+  else state.events.forEach(event => state.selectedEventIds.add(event.id));
+  renderTimeline();
 }
 
 async function deleteTimelineEvent(id) {
@@ -143,22 +230,46 @@ async function deleteTimelineEvent(id) {
   try {
     await api(`/api/events/${id}`, { method: 'DELETE' });
     state.events = state.events.filter(event => event.id !== id);
+    state.selectedEventIds.delete(id);
     if ($('#eventCount')) $('#eventCount').textContent = state.events.length;
     renderTimeline();
     toast('Evento excluído.');
   } catch (error) { toast(error.message, 'error'); }
 }
 
+async function deleteSelectedTimelineEvents() {
+  const ids = [...state.selectedEventIds];
+  if (!ids.length) return;
+  if (!confirm(`Excluir ${ids.length} evento(s) selecionado(s) e seus snapshots?`)) return;
+  try {
+    const result = await api('/api/events/delete-bulk', { method: 'POST', body: JSON.stringify({ ids }) });
+    state.selectedEventIds.clear();
+    await loadEvents();
+    toast(`${result.deleted || ids.length} evento(s) excluído(s).`);
+  } catch (error) { toast(error.message, 'error'); }
+}
+
 async function deleteAllTimelineEvents() {
   const cameraId = $('#timelineCamera')?.value || '';
-  const scope = cameraId ? 'todos os eventos desta câmera' : 'TODOS os eventos da Timeline';
+  const scope = cameraId ? 'todos os eventos desta câmera (independentemente dos demais filtros)' : 'TODOS os eventos da Timeline';
   if (!confirm(`Excluir ${scope} e seus snapshots? Esta ação não pode ser desfeita.`)) return;
   try {
     const suffix = cameraId ? `?camera_id=${encodeURIComponent(cameraId)}` : '';
     await api(`/api/events${suffix}`, { method: 'DELETE' });
+    state.selectedEventIds.clear();
     await loadEvents();
+    await loadPersons();
     toast(cameraId ? 'Eventos desta câmera excluídos.' : 'Timeline limpa.');
   } catch (error) { toast(error.message, 'error'); }
+}
+
+function clearTimelineFilters() {
+  ['timelineCamera', 'timelinePerson', 'timelineDateFrom', 'timelineDateTo', 'timelineTimeFrom', 'timelineTimeTo', 'timelineFace'].forEach(id => {
+    const el = $(`#${id}`);
+    if (el) el.value = '';
+  });
+  state.selectedEventIds.clear();
+  loadEvents();
 }
 
 function setView(view) {
@@ -168,7 +279,7 @@ function setView(view) {
   $$('.view').forEach(el => el.classList.remove('active'));
   $(`#${view}View`).classList.add('active');
   $$('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
-  if (view === 'timeline') loadEvents();
+  if (view === 'timeline') Promise.all([loadPersons(), loadEvents()]);
 }
 
 function openCameraDialog(cameraId = null) {
