@@ -72,13 +72,14 @@
 
     pc.addEventListener('connectionstatechange', () => {
       if (pc.connectionState === 'connected') {
-        report('connected', microphone ? (listen ? 'Vídeo + áudio + microfone ativos' : 'Vídeo + microfone ativo') : 'Vídeo + áudio ativos');
+        report('connected', microphone ? (listen ? 'Vídeo + áudio + microfone ativos' : 'Falando para a câmera') : 'Vídeo + áudio ativos');
       }
       if (['failed', 'disconnected'].includes(pc.connectionState)) report('connection-error', `Áudio WebRTC: ${pc.connectionState}`);
     });
 
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${scheme}://${location.host}/api/cameras/${encodeURIComponent(cameraId)}/webrtc/ws`);
+    const talkbackQuery = microphone ? '?talkback=1' : '';
+    ws = new WebSocket(`${scheme}://${location.host}/api/cameras/${encodeURIComponent(cameraId)}/webrtc/ws${talkbackQuery}`);
     ws.addEventListener('open', async () => {
       pc.addEventListener('icecandidate', event => {
         if (event.candidate && ws.readyState === WebSocket.OPEN) {
@@ -99,7 +100,7 @@
         report('webrtc-error', msg.value || 'Falha no áudio WebRTC');
       }
     });
-    ws.addEventListener('error', () => report('signal-error', 'Falha na sinalização de áudio.'));
+    ws.addEventListener('error', () => report('signal-error', microphone ? 'Falha no talkback da câmera.' : 'Falha na sinalização de áudio.'));
   }
 
   async function connect() {
@@ -108,9 +109,8 @@
     if (!response.ok) throw new Error('Não foi possível carregar a câmera.');
     const camera = await response.json();
 
-    // Video uses go2rtc's official universal player. It can fall back to MSE for
-    // H.265 streams, while audio/talkback is negotiated separately as audio-only
-    // WebRTC so an H.265 camera never causes a browser WebRTC codec mismatch.
+    // Video always stays on the primary RTSP stream. Talkback is an isolated
+    // auxiliary stream, so DVRIP failures can never interrupt H.265 video or CV.
     videoFrame.src = `/go2rtc/stream.html?src=${encodeURIComponent(camera.stream_name)}`;
     report('video-loading', 'Carregando vídeo…');
 
