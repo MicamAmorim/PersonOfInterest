@@ -13,8 +13,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import discovery, go2rtc, ptz
+from .alerts import manager as alert_manager
+from .api_v34 import router as v34_router
 from .config import APP_NAME, APP_VERSION, DB_PATH, EVENTS_DIR, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
+from .identity import manager as identity_manager
 from .models import (
     CameraCreate,
     CameraOut,
@@ -78,18 +81,9 @@ async def sync_camera(camera_id: int) -> CameraOut:
         set_sync_state(camera_id, "disabled")
         return camera_row_to_out(get_camera_row(camera_id))
 
-    # Keep RTSP as the primary video/camera-mic source. For Xiongmai/iCSee
-    # cameras, add DVRIP as a lazy second source dedicated to browser mic ->
-    # camera-speaker backchannel. If the device is not DVRIP this source is
-    # simply never negotiated; normal video remains unaffected.
     backchannel = go2rtc.dvrip_backchannel_url(row["rtsp_url"])
     extras = [backchannel] if backchannel else []
-    result = await asyncio.to_thread(
-        go2rtc.upsert_stream,
-        row["stream_name"],
-        row["rtsp_url"],
-        extras,
-    )
+    result = await asyncio.to_thread(go2rtc.upsert_stream, row["stream_name"], row["rtsp_url"], extras)
     if result.ok:
         set_sync_state(camera_id, "ok")
         vision_manager.start_camera(camera_id, row["rtsp_url"], row["stream_name"], row["name"])
@@ -101,6 +95,8 @@ async def sync_camera(camera_id: int) -> CameraOut:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    identity_manager.start()
+    alert_manager.start()
     with connection() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM cameras ORDER BY id").fetchall()]
     for camera_id in ids:
@@ -111,10 +107,13 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        alert_manager.stop()
+        identity_manager.stop()
         vision_manager.stop_all()
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
+app.include_router(v34_router)
 
 
 @app.get("/api/health")
@@ -126,6 +125,10 @@ async def health() -> dict:
         "database": "ok" if db_ok else "missing", "go2rtc": "ok" if rtc.ok else "unavailable",
         "go2rtc_error": rtc.error, "vision": "ok" if vision_manager.available else "unavailable",
         "vision_error": vision_manager.import_error,
+        "identity": identity_manager.status,
+        "identity_error": identity_manager.error,
+        "alerts": alert_manager.status,
+        "alerts_error": alert_manager.error,
     }
 
 
@@ -395,6 +398,8 @@ def list_events(
             "id": row["id"], "camera_id": row["camera_id"], "camera_name": row["camera_name"],
             "camera_location": row["camera_location"], "track_id": row["track_id"], "event_type": row["event_type"],
             "person_id": row["person_id"], "person_name": row["person_name"],
+            "unknown_cluster_id": row["unknown_cluster_id"], "identity_state": row["identity_state"],
+            "identity_confidence": row["identity_confidence"],
             "has_face": bool(row["has_face"]), "face_count": row["face_count"], "confidence": row["confidence"],
             "created_at": row["created_at"], "snapshot_url": f"/api/events/{row['id']}/snapshot" if row["snapshot_path"] else None,
         }
@@ -420,10 +425,7 @@ def _delete_event_ids(ids: list[int]) -> int:
         return 0
     marks = ",".join("?" for _ in ids)
     with connection() as conn:
-        rows = conn.execute(
-            f"SELECT id, snapshot_path FROM events WHERE id IN ({marks})",
-            ids,
-        ).fetchall()
+        rows = conn.execute(f"SELECT id, snapshot_path FROM events WHERE id IN ({marks})", ids).fetchall()
         if rows:
             found_ids = [int(row["id"]) for row in rows]
             found_marks = ",".join("?" for _ in found_ids)
