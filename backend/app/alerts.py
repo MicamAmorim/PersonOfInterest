@@ -226,6 +226,7 @@ class AlertManager:
                 "title": rule.get("name") or "PersonOfInterest",
                 "body": body,
                 "url": f"/?view=timeline&event={event['id']}",
+                "image": f"/api/events/{event['id']}/snapshot" if event.get("snapshot_path") else None,
                 "tag": f"poi-rule-{rule['id']}",
                 "event_id": event["id"],
                 "camera_id": event["camera_id"],
@@ -233,8 +234,6 @@ class AlertManager:
             ensure_ascii=False,
         )
         if not subscriptions:
-            # A rule can exist before a phone subscribes. Record that it matched,
-            # but don't start cooldown without an actual delivery.
             return
         for subscription in subscriptions:
             status, error = self._send(subscription, payload)
