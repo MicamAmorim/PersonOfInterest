@@ -12,6 +12,9 @@ $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
 $Go2rtcExe = Join-Path $Root "bin\go2rtc.exe"
 $RuntimeConfig = Join-Path $Root "data\go2rtc.runtime.yaml"
 $Requirements = Join-Path $Root "backend\requirements.txt"
+$ModelsDir = Join-Path $Root "data\models"
+$VisionModel = Join-Path $ModelsDir "yolox_tiny.onnx"
+$VisionModelUrl = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx"
 
 if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
@@ -21,31 +24,50 @@ Write-Host "Verificando dependencias da V2..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $PythonExe -c "import cv2, numpy, sys; ok = hasattr(cv2, 'HOGDescriptor') and int(cv2.__version__.split('.')[0]) < 5; sys.exit(0 if ok else 2)" *> $null
+    & $PythonExe -c "import cv2, numpy, onnxruntime, sys; ok = int(cv2.__version__.split('.')[0]) < 5; sys.exit(0 if ok else 2)" *> $null
     $visionDepsExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $oldErrorActionPreference
 }
 
 if ($visionDepsExitCode -ne 0) {
-    Write-Host "Ajustando dependencias de visao (OpenCV 4.x)..." -ForegroundColor Yellow
+    Write-Host "Ajustando dependencias de visao/ONNX..." -ForegroundColor Yellow
     & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
         throw "Falha ao instalar as dependencias da V2."
     }
 }
 
-& $PythonExe -c "import cv2, numpy, sys; assert hasattr(cv2, 'HOGDescriptor'), 'OpenCV sem HOGDescriptor'; assert int(cv2.__version__.split('.')[0]) < 5, 'OpenCV 5 nao e suportado pelo detector atual'; print('OpenCV', cv2.__version__, '| NumPy', numpy.__version__)"
+& $PythonExe -c "import cv2, numpy, onnxruntime; assert int(cv2.__version__.split('.')[0]) < 5, 'OpenCV 5 nao e suportado'; print('OpenCV', cv2.__version__, '| NumPy', numpy.__version__, '| ONNX Runtime', onnxruntime.__version__)"
 if ($LASTEXITCODE -ne 0) {
-    throw "OpenCV/NumPy nao estao compativeis com o detector da V2."
+    throw "OpenCV/NumPy/ONNX Runtime nao estao compativeis com a V2."
+}
+
+New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
+New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
+
+if (-not (Test-Path $VisionModel) -or (Get-Item $VisionModel).Length -lt 1000000) {
+    Write-Host "Baixando detector YOLOX-Tiny ONNX (uma unica vez)..." -ForegroundColor Yellow
+    $VisionModelPart = "$VisionModel.part"
+    if (Test-Path $VisionModelPart) { Remove-Item $VisionModelPart -Force }
+    try {
+        Invoke-WebRequest -Uri $VisionModelUrl -OutFile $VisionModelPart -UseBasicParsing
+        if ((Get-Item $VisionModelPart).Length -lt 1000000) {
+            throw "Arquivo de modelo incompleto."
+        }
+        Move-Item $VisionModelPart $VisionModel -Force
+    } catch {
+        if (Test-Path $VisionModelPart) { Remove-Item $VisionModelPart -Force }
+        throw "Falha ao baixar YOLOX-Tiny ONNX: $($_.Exception.Message)"
+    }
 }
 
 $env:DATA_DIR = Join-Path $Root "data"
 $env:FRONTEND_DIR = Join-Path $Root "frontend"
 $env:GO2RTC_API_URL = "http://127.0.0.1:1984"
 $env:GO2RTC_BROWSER_BASE = "direct"
+$env:VISION_MODEL_PATH = $VisionModel
 
-New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 $runtimeYaml = @'
 api:
   listen: ":1984"
