@@ -9,12 +9,19 @@ from pathlib import Path
 from typing import Any
 
 from .config import (
+    BODY_NEGATIVE_BBOX_IOU,
+    BODY_NEGATIVE_MARGIN,
+    BODY_NEGATIVE_MIN_QUALITY,
+    BODY_NEGATIVE_MIN_SUPPORT,
+    BODY_NEGATIVE_SINGLE_THRESHOLD,
+    BODY_NEGATIVE_THRESHOLD,
     BODY_REID_FACE_BONUS,
     BODY_REID_MARGIN,
     BODY_REID_MODEL_PATH,
     BODY_REID_POLL_SECONDS,
     BODY_REID_THRESHOLD,
     EVENTS_DIR,
+    FACES_DIR,
 )
 from .db import connection, utc_now
 
@@ -67,10 +74,114 @@ def _event_path(relative: str | None) -> Path | None:
     return path
 
 
+def _face_path(relative: str | None) -> Path | None:
+    if not relative:
+        return None
+    path = (FACES_DIR / relative).resolve()
+    root = FACES_DIR.resolve()
+    if root not in path.parents:
+        return None
+    return path
+
+
 def _source_bonus(source: str | None) -> float:
     # Body is never an absolute identity signal. A body sample that was observed
     # in the same event as a confirmed face is simply a stronger ReID reference.
     return BODY_REID_FACE_BONUS if (source or "").startswith("face_verified") else 0.0
+
+
+def _bbox_tuple(raw: str | None) -> tuple[float, float, float, float] | None:
+    if not raw:
+        return None
+    try:
+        box = json.loads(raw)
+        x = float(box.get("x", 0))
+        y = float(box.get("y", 0))
+        w = float(box.get("w", 0))
+        h = float(box.get("h", 0))
+        if w <= 0 or h <= 0:
+            return None
+        return x, y, w, h
+    except Exception:
+        return None
+
+
+def _bbox_iou(a_raw: str | None, b_raw: str | None) -> float:
+    a = _bbox_tuple(a_raw)
+    b = _bbox_tuple(b_raw)
+    if a is None or b is None:
+        return 0.0
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    left = max(ax, bx)
+    top = max(ay, by)
+    right = min(ax + aw, bx + bw)
+    bottom = min(ay + ah, by + bh)
+    inter = max(0.0, right - left) * max(0.0, bottom - top)
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 1e-9 else 0.0
+
+
+def _best_positive_body_score(query: Any, query_quality: float, gallery: list[dict[str, Any]]) -> float:
+    best = -1.0
+    query_factor = 0.90 + 0.10 * max(0.0, min(1.0, query_quality))
+    for item in gallery:
+        candidate = _blob_to_vector(item.get("embedding"))
+        if candidate is None:
+            continue
+        quality = max(0.0, min(1.0, float(item.get("quality") or 0.0)))
+        score = _cosine(query, candidate) * (0.88 + 0.12 * quality)
+        score += _source_bonus(item.get("source"))
+        best = max(best, score * query_factor)
+    return best
+
+
+def rank_hard_negative(
+    query: Any,
+    query_quality: float,
+    negatives: list[dict[str, Any]],
+    positive_gallery: list[dict[str, Any]] | None = None,
+    query_bbox_json: str | None = None,
+) -> tuple[bool, float | None, str | None]:
+    """Decide whether a detection strongly matches reviewed false positives.
+
+    This is deliberately conservative. Two supporting manual negatives are the
+    normal path. A single example may reject only at very high appearance
+    similarity plus strong bounding-box overlap, which is useful for stationary
+    objects repeatedly mistaken for people. Verified human body references can
+    veto a weak/ambiguous negative match.
+    """
+    query_factor = 0.90 + 0.10 * max(0.0, min(1.0, query_quality))
+    scored: list[tuple[float, float]] = []
+    for item in negatives:
+        candidate = _blob_to_vector(item.get("embedding"))
+        if candidate is None:
+            continue
+        reference_quality = max(0.0, min(1.0, float(item.get("quality") or 0.0)))
+        score = _cosine(query, candidate) * (0.90 + 0.10 * reference_quality) * query_factor
+        scored.append((score, _bbox_iou(query_bbox_json, item.get("bbox_json"))))
+
+    if not scored:
+        return False, None, None
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    top = scored[:3]
+    best_score, best_iou = top[0]
+    support = sum(1 for score, _ in scored if score >= BODY_NEGATIVE_THRESHOLD - 0.035)
+    mean_top = sum(score for score, _ in top) / len(top)
+    aggregate = 0.74 * best_score + 0.26 * mean_top
+
+    positive_best = _best_positive_body_score(query, query_quality, positive_gallery or [])
+    if positive_best >= BODY_REID_THRESHOLD and aggregate < positive_best + BODY_NEGATIVE_MARGIN:
+        return False, aggregate, "human_reference_wins"
+
+    if support >= max(2, BODY_NEGATIVE_MIN_SUPPORT) and aggregate >= BODY_NEGATIVE_THRESHOLD:
+        return True, min(0.999, aggregate), "repeated_reviewed_negative"
+
+    if best_score >= BODY_NEGATIVE_SINGLE_THRESHOLD and best_iou >= BODY_NEGATIVE_BBOX_IOU:
+        if positive_best < BODY_REID_THRESHOLD or best_score >= positive_best + BODY_NEGATIVE_MARGIN:
+            return True, min(0.999, best_score), "stationary_reviewed_negative"
+
+    return False, min(0.999, aggregate), "insufficient_negative_evidence"
 
 
 def rank_probable(
@@ -141,10 +252,26 @@ class BodyIdentityManager:
     def available(self) -> bool:
         return RUNTIME_AVAILABLE and BODY_REID_MODEL_PATH.is_file()
 
+    def _ensure_aux_schema(self) -> None:
+        with connection() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS body_negative_exemptions (
+                    event_id INTEGER PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_body_negative_exemptions_created
+                    ON body_negative_exemptions(created_at DESC);
+                """
+            )
+            conn.commit()
+
     def start(self) -> None:
         with self.lock:
             if self.thread and self.thread.is_alive():
                 return
+            self._ensure_aux_schema()
             self.stop_event.clear()
             self.wake_event.clear()
             self.thread = threading.Thread(target=self._run, name="poi-body-reid", daemon=True)
@@ -171,9 +298,6 @@ class BodyIdentityManager:
         self._input_name = input_meta.name
         shape = list(input_meta.shape)
         self._nchw = not (len(shape) == 4 and shape[-1] == 3)
-        # Some exported OSNet models have a fixed batch dimension (for example
-        # 16). We still process one event at a time, but repeat the same crop to
-        # satisfy the model shape and keep only the first embedding.
         first_dim = shape[0] if shape else 1
         self._batch_size = int(first_dim) if isinstance(first_dim, int) and first_dim > 0 else 1
 
@@ -181,6 +305,7 @@ class BodyIdentityManager:
         self.status = "starting"
         try:
             self._ensure_model()
+            self._ensure_aux_schema()
             self.status = "running"
             self.error = None
         except Exception as exc:
@@ -191,11 +316,12 @@ class BodyIdentityManager:
         while not self.stop_event.is_set():
             try:
                 self._sync_verified_labels()
+                backfilled = self._backfill_hard_negatives(4)
                 processed = self.process_pending_once(6)
-                self._refresh_probables(80)
+                self._refresh_probables(100)
                 self.status = "running"
                 self.error = None
-                delay = 0.15 if processed else max(0.35, BODY_REID_POLL_SECONDS)
+                delay = 0.15 if (processed or backfilled) else max(0.35, BODY_REID_POLL_SECONDS)
             except sqlite3.OperationalError:
                 delay = 0.8
             except Exception as exc:
@@ -207,13 +333,17 @@ class BodyIdentityManager:
 
     def state(self) -> dict[str, Any]:
         try:
+            self._ensure_aux_schema()
             with connection() as conn:
                 samples = int(conn.execute("SELECT COUNT(*) FROM body_samples").fetchone()[0])
                 verified = int(conn.execute("SELECT COUNT(*) FROM body_samples WHERE verified = 1 AND person_id IS NOT NULL").fetchone()[0])
                 probable = int(conn.execute("SELECT COUNT(*) FROM events WHERE person_id IS NULL AND probable_person_id IS NOT NULL").fetchone()[0])
                 negatives = int(conn.execute("SELECT COUNT(*) FROM body_negative_samples").fetchone()[0])
+                auto_false = int(conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE identity_state = 'false_positive' AND body_identity_source = 'hard_negative_auto'"
+                ).fetchone()[0])
         except Exception:
-            samples = verified = probable = negatives = 0
+            samples = verified = probable = negatives = auto_false = 0
         return {
             "status": self.status,
             "error": self.error,
@@ -222,8 +352,13 @@ class BodyIdentityManager:
             "verified_samples": verified,
             "probable_events": probable,
             "hard_negatives": negatives,
+            "auto_false_positives": auto_false,
             "threshold": BODY_REID_THRESHOLD,
             "margin": BODY_REID_MARGIN,
+            "negative_threshold": BODY_NEGATIVE_THRESHOLD,
+            "negative_single_threshold": BODY_NEGATIVE_SINGLE_THRESHOLD,
+            "negative_margin": BODY_NEGATIVE_MARGIN,
+            "negative_min_support": BODY_NEGATIVE_MIN_SUPPORT,
         }
 
     def _load_event_crop(self, event: dict[str, Any]) -> tuple[Any, float] | None:
@@ -283,6 +418,26 @@ class BodyIdentityManager:
         crop, quality = loaded
         return self._embed_crop(crop), quality
 
+    def _backfill_hard_negatives(self, limit: int = 4) -> int:
+        with connection() as conn:
+            rows = conn.execute(
+                """SELECT e.id FROM events e
+                LEFT JOIN body_negative_samples bn ON bn.event_id = e.id
+                WHERE e.identity_state = 'false_positive'
+                  AND e.snapshot_path IS NOT NULL
+                  AND bn.id IS NULL
+                  AND COALESCE(e.body_identity_source, '') <> 'hard_negative_auto'
+                ORDER BY e.created_at DESC LIMIT ?""",
+                (max(1, int(limit)),),
+            ).fetchall()
+        count = 0
+        for row in rows:
+            if self.stop_event.is_set():
+                break
+            self.record_false_positive(int(row["id"]))
+            count += 1
+        return count
+
     def process_pending_once(self, limit: int = 6) -> int:
         with connection() as conn:
             rows = conn.execute(
@@ -312,7 +467,8 @@ class BodyIdentityManager:
                 "SELECT person_id FROM face_samples WHERE event_id = ? AND person_id IS NOT NULL",
                 (event["id"],),
             ).fetchone()
-            person_id = event.get("person_id")
+            current = conn.execute("SELECT person_id FROM events WHERE id = ?", (event["id"],)).fetchone()
+            person_id = current["person_id"] if current else event.get("person_id")
             verified = int(person_id is not None)
             if verified and face and int(face["person_id"]) == int(person_id):
                 source = "face_verified"
@@ -332,6 +488,8 @@ class BodyIdentityManager:
             )
             conn.commit()
         if person_id is None:
+            if self._check_hard_negative(int(event["id"]), embedding, quality):
+                return
             self._score_event(int(event["id"]), embedding=embedding, quality=quality)
 
     def _gallery(self) -> list[dict[str, Any]]:
@@ -340,9 +498,112 @@ class BodyIdentityManager:
                 """SELECT person_id, embedding, quality, source
                 FROM body_samples
                 WHERE verified = 1 AND person_id IS NOT NULL
-                  AND source <> 'false_positive' AND quality >= 0.38"""
+                  AND source NOT IN ('false_positive', 'auto_false_positive') AND quality >= 0.38"""
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def _negative_gallery(self, camera_id: int) -> list[dict[str, Any]]:
+        with connection() as conn:
+            rows = conn.execute(
+                """SELECT bn.embedding, bn.quality, e.bbox_json
+                FROM body_negative_samples bn
+                LEFT JOIN events e ON e.id = bn.event_id
+                WHERE bn.camera_id = ? AND bn.quality >= ?
+                ORDER BY bn.created_at DESC LIMIT 160""",
+                (camera_id, BODY_NEGATIVE_MIN_QUALITY),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _check_hard_negative(self, event_id: int, embedding: Any, quality: float) -> bool:
+        self._ensure_aux_schema()
+        with connection() as conn:
+            event = conn.execute(
+                "SELECT id, camera_id, person_id, identity_state, bbox_json FROM events WHERE id = ?",
+                (event_id,),
+            ).fetchone()
+            if event is None or event["person_id"] is not None or event["identity_state"] == "false_positive":
+                return False
+            if conn.execute("SELECT 1 FROM body_negative_exemptions WHERE event_id = ?", (event_id,)).fetchone():
+                return False
+        negatives = self._negative_gallery(int(event["camera_id"]))
+        if not negatives:
+            return False
+        rejected, score, _ = rank_hard_negative(
+            embedding,
+            quality,
+            negatives,
+            self._gallery(),
+            str(event["bbox_json"] or ""),
+        )
+        if not rejected:
+            return False
+        self._mark_auto_false_positive(event_id, float(score or 0.0))
+        return True
+
+    def _mark_auto_false_positive(self, event_id: int, score: float) -> None:
+        crops_to_delete: set[str] = set()
+        with connection() as conn:
+            event = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            if event is None or event["person_id"] is not None:
+                return
+            sample = conn.execute(
+                "SELECT cluster_id, crop_path FROM face_samples WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            cluster_id = event["unknown_cluster_id"] or (sample["cluster_id"] if sample else None)
+
+            if cluster_id is not None:
+                samples = conn.execute(
+                    "SELECT event_id, crop_path FROM face_samples WHERE cluster_id = ?",
+                    (cluster_id,),
+                ).fetchall()
+                crops_to_delete.update(str(row["crop_path"]) for row in samples if row["crop_path"])
+                conn.execute("DELETE FROM face_samples WHERE cluster_id = ?", (cluster_id,))
+                conn.execute(
+                    """UPDATE events
+                    SET person_id = NULL, probable_person_id = NULL, body_confidence = NULL,
+                        body_identity_source = NULL, unknown_cluster_id = NULL,
+                        identity_state = 'pending', identity_confidence = NULL
+                    WHERE unknown_cluster_id = ? AND id <> ?
+                      AND COALESCE(identity_state, '') <> 'false_positive'""",
+                    (cluster_id, event_id),
+                )
+                conn.execute("DELETE FROM unknown_clusters WHERE id = ?", (cluster_id,))
+
+            current_sample = conn.execute(
+                "SELECT crop_path FROM face_samples WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if current_sample and current_sample["crop_path"]:
+                crops_to_delete.add(str(current_sample["crop_path"]))
+            conn.execute("DELETE FROM face_samples WHERE event_id = ?", (event_id,))
+            conn.execute(
+                """UPDATE body_samples
+                SET person_id = NULL, verified = 0, source = 'auto_false_positive', updated_at = ?
+                WHERE event_id = ?""",
+                (utc_now(), event_id),
+            )
+            conn.execute(
+                """UPDATE events
+                SET person_id = NULL, probable_person_id = NULL, body_confidence = ?,
+                    body_identity_source = 'hard_negative_auto', unknown_cluster_id = NULL,
+                    identity_state = 'false_positive', identity_confidence = NULL
+                WHERE id = ?""",
+                (max(0.0, min(0.999, score)), event_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO alert_event_state(event_id, evaluated_at) VALUES (?, ?)",
+                (event_id, utc_now()),
+            )
+            conn.commit()
+
+        for crop in crops_to_delete:
+            path = _face_path(crop)
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _score_event(self, event_id: int, *, embedding: Any | None = None, quality: float | None = None) -> None:
         with connection() as conn:
@@ -351,11 +612,12 @@ class BodyIdentityManager:
                 (event_id,),
             ).fetchone()
             if event is None or event["person_id"] is not None or event["identity_state"] == "false_positive":
-                conn.execute(
-                    "UPDATE events SET probable_person_id = NULL, body_confidence = NULL, body_identity_source = NULL WHERE id = ?",
-                    (event_id,),
-                )
-                conn.commit()
+                if event is not None and event["identity_state"] != "false_positive":
+                    conn.execute(
+                        "UPDATE events SET probable_person_id = NULL, body_confidence = NULL, body_identity_source = NULL WHERE id = ?",
+                        (event_id,),
+                    )
+                    conn.commit()
                 return
             if embedding is None:
                 sample = conn.execute(
@@ -377,16 +639,23 @@ class BodyIdentityManager:
             )
             conn.commit()
 
-    def _refresh_probables(self, limit: int = 80) -> None:
+    def _refresh_probables(self, limit: int = 100) -> None:
         with connection() as conn:
             rows = conn.execute(
-                """SELECT e.id FROM events e JOIN body_samples bs ON bs.event_id = e.id
+                """SELECT e.id, bs.embedding, bs.quality
+                FROM events e JOIN body_samples bs ON bs.event_id = e.id
                 WHERE e.person_id IS NULL AND COALESCE(e.identity_state, '') <> 'false_positive'
                 ORDER BY e.created_at DESC LIMIT ?""",
                 (max(1, int(limit)),),
             ).fetchall()
         for row in rows:
-            self._score_event(int(row["id"]))
+            embedding = _blob_to_vector(row["embedding"])
+            if embedding is None:
+                continue
+            quality = float(row["quality"] or 0.0)
+            if self._check_hard_negative(int(row["id"]), embedding, quality):
+                continue
+            self._score_event(int(row["id"]), embedding=embedding, quality=quality)
 
     def _sync_verified_labels(self) -> None:
         with connection() as conn:
@@ -409,6 +678,10 @@ class BodyIdentityManager:
                         (event_person, desired_source, now, row["event_id"]),
                     )
                     conn.execute(
+                        "DELETE FROM body_negative_exemptions WHERE event_id = ?",
+                        (row["event_id"],),
+                    )
+                    conn.execute(
                         "UPDATE events SET probable_person_id = NULL, body_confidence = NULL, body_identity_source = NULL WHERE id = ?",
                         (row["event_id"],),
                     )
@@ -417,6 +690,7 @@ class BodyIdentityManager:
                 conn.commit()
 
     def confirm_event_identity(self, event_id: int, person_id: int) -> None:
+        self._ensure_aux_schema()
         with connection() as conn:
             face = conn.execute(
                 "SELECT 1 FROM face_samples WHERE event_id = ? AND person_id = ?",
@@ -428,6 +702,7 @@ class BodyIdentityManager:
                 WHERE event_id = ?""",
                 (person_id, source, utc_now(), event_id),
             )
+            conn.execute("DELETE FROM body_negative_exemptions WHERE event_id = ?", (event_id,))
             conn.execute(
                 "UPDATE events SET probable_person_id = NULL, body_confidence = NULL, body_identity_source = NULL WHERE id = ?",
                 (event_id,),
@@ -436,6 +711,7 @@ class BodyIdentityManager:
         self.notify_change()
 
     def record_false_positive(self, event_id: int) -> None:
+        self._ensure_aux_schema()
         embedding: Any | None = None
         quality = 0.0
         camera_id: int | None = None
@@ -452,8 +728,6 @@ class BodyIdentityManager:
                 embedding = _blob_to_vector(sample["embedding"])
                 quality = float(sample["quality"] or 0.0)
         if embedding is None:
-            # Hard-negative extraction is useful, but a model/runtime failure
-            # must never veto the user's explicit false-positive decision.
             try:
                 embedded = self._event_embedding(dict(event))
                 if embedded is not None:
@@ -461,6 +735,7 @@ class BodyIdentityManager:
             except Exception as exc:
                 self.error = f"Hard-negative não extraído: {exc}"
         with connection() as conn:
+            conn.execute("DELETE FROM body_negative_exemptions WHERE event_id = ?", (event_id,))
             if embedding is not None and camera_id is not None:
                 conn.execute(
                     """INSERT OR REPLACE INTO body_negative_samples(event_id, camera_id, embedding, quality, created_at)
@@ -483,8 +758,16 @@ class BodyIdentityManager:
         self.notify_change()
 
     def undo_false_positive(self, event_id: int) -> None:
+        self._ensure_aux_schema()
         with connection() as conn:
+            sample = conn.execute("SELECT source FROM body_samples WHERE event_id = ?", (event_id,)).fetchone()
+            was_auto = bool(sample and sample["source"] == "auto_false_positive")
             conn.execute("DELETE FROM body_negative_samples WHERE event_id = ?", (event_id,))
+            if was_auto:
+                conn.execute(
+                    "INSERT OR REPLACE INTO body_negative_exemptions(event_id, created_at) VALUES (?, ?)",
+                    (event_id, utc_now()),
+                )
             conn.execute(
                 """UPDATE body_samples SET person_id = NULL, verified = 0, source = 'unlabeled', updated_at = ?
                 WHERE event_id = ?""",
