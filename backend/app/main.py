@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
@@ -14,7 +15,18 @@ from fastapi.staticfiles import StaticFiles
 from . import discovery, go2rtc, ptz
 from .config import APP_NAME, APP_VERSION, DB_PATH, EVENTS_DIR, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
-from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest, PTZMoveRequest, VisionFollowRequest, VisionSettingsUpdate
+from .models import (
+    CameraCreate,
+    CameraOut,
+    CameraUpdate,
+    DiscoveryProbeRequest,
+    EventBulkDeleteRequest,
+    EventPersonAssignRequest,
+    PTZMoveRequest,
+    PersonCreate,
+    VisionFollowRequest,
+    VisionSettingsUpdate,
+)
 from .vision import manager as vision_manager
 
 
@@ -65,7 +77,19 @@ async def sync_camera(camera_id: int) -> CameraOut:
         vision_manager.stop_camera(camera_id)
         set_sync_state(camera_id, "disabled")
         return camera_row_to_out(get_camera_row(camera_id))
-    result = await asyncio.to_thread(go2rtc.upsert_stream, row["stream_name"], row["rtsp_url"])
+
+    # Keep RTSP as the primary video/camera-mic source. For Xiongmai/iCSee
+    # cameras, add DVRIP as a lazy second source dedicated to browser mic ->
+    # camera-speaker backchannel. If the device is not DVRIP this source is
+    # simply never negotiated; normal video remains unaffected.
+    backchannel = go2rtc.dvrip_backchannel_url(row["rtsp_url"])
+    extras = [backchannel] if backchannel else []
+    result = await asyncio.to_thread(
+        go2rtc.upsert_stream,
+        row["stream_name"],
+        row["rtsp_url"],
+        extras,
+    )
     if result.ok:
         set_sync_state(camera_id, "ok")
         vision_manager.start_camera(camera_id, row["rtsp_url"], row["stream_name"], row["name"])
@@ -196,6 +220,23 @@ async def delete_camera(camera_id: int) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.get("/api/cameras/{camera_id}/audio/status")
+async def camera_audio_status(camera_id: int) -> dict:
+    row = get_camera_row(camera_id)
+    info: dict = {}
+    try:
+        info = await asyncio.to_thread(go2rtc.stream_info, row["stream_name"])
+    except Exception:
+        pass
+    text = json.dumps(info, ensure_ascii=False).lower()
+    return {
+        "ok": row["sync_status"] == "ok",
+        "camera_audio_detected": "audio" in text,
+        "talkback_configured": go2rtc.dvrip_backchannel_url(row["rtsp_url"]) is not None,
+        "note": "Microfone do navegador requer WebRTC e contexto HTTPS/localhost; o dispositivo também precisa aceitar DVRIP/RTSP backchannel.",
+    }
+
+
 @app.get("/api/vision/cameras/{camera_id}/state")
 def vision_state(camera_id: int) -> dict:
     get_camera_row(camera_id)
@@ -270,14 +311,81 @@ async def ptz_goto_home(camera_id: int) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/persons")
+def list_persons() -> list[dict]:
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT p.id, p.name, p.created_at, p.updated_at, COUNT(e.id) AS event_count
+            FROM persons p LEFT JOIN events e ON e.person_id = p.id
+            GROUP BY p.id ORDER BY p.name COLLATE NOCASE"""
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/api/persons", status_code=status.HTTP_201_CREATED)
+def create_person(payload: PersonCreate) -> dict:
+    now = utc_now()
+    with connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO persons(name, created_at, updated_at) VALUES (?, ?, ?)",
+            (payload.name, now, now),
+        )
+        conn.commit()
+        person_id = int(cursor.lastrowid)
+    return {"id": person_id, "name": payload.name, "created_at": now, "updated_at": now, "event_count": 0}
+
+
+@app.patch("/api/events/{event_id}/person")
+def assign_event_person(event_id: int, payload: EventPersonAssignRequest) -> dict:
+    with connection() as conn:
+        event = conn.execute("SELECT id FROM events WHERE id = ?", (event_id,)).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Evento não encontrado")
+        if payload.person_id is not None:
+            person = conn.execute("SELECT id, name FROM persons WHERE id = ?", (payload.person_id,)).fetchone()
+            if person is None:
+                raise HTTPException(status_code=404, detail="Pessoa não encontrada")
+        conn.execute("UPDATE events SET person_id = ? WHERE id = ?", (payload.person_id, event_id))
+        conn.commit()
+    return {"ok": True, "event_id": event_id, "person_id": payload.person_id}
+
+
 @app.get("/api/events")
-def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=1, le=500)) -> list[dict]:
-    sql = """SELECT e.*, c.name AS camera_name, c.location AS camera_location
-        FROM events e JOIN cameras c ON c.id = e.camera_id"""
+def list_events(
+    camera_id: int | None = None,
+    person_id: int | None = Query(default=None, ge=1),
+    unidentified: bool = False,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    has_face: bool | None = None,
+    limit: int = Query(default=120, ge=1, le=500),
+) -> list[dict]:
+    sql = """SELECT e.*, c.name AS camera_name, c.location AS camera_location,
+        p.name AS person_name
+        FROM events e
+        JOIN cameras c ON c.id = e.camera_id
+        LEFT JOIN persons p ON p.id = e.person_id"""
+    where: list[str] = []
     params: list[object] = []
     if camera_id is not None:
-        sql += " WHERE e.camera_id = ?"
+        where.append("e.camera_id = ?")
         params.append(camera_id)
+    if person_id is not None:
+        where.append("e.person_id = ?")
+        params.append(person_id)
+    elif unidentified:
+        where.append("e.person_id IS NULL")
+    if from_ts:
+        where.append("e.created_at >= ?")
+        params.append(from_ts)
+    if to_ts:
+        where.append("e.created_at <= ?")
+        params.append(to_ts)
+    if has_face is not None:
+        where.append("e.has_face = ?")
+        params.append(int(has_face))
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY e.created_at DESC LIMIT ?"
     params.append(limit)
     with connection() as conn:
@@ -286,6 +394,7 @@ def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=
         {
             "id": row["id"], "camera_id": row["camera_id"], "camera_name": row["camera_name"],
             "camera_location": row["camera_location"], "track_id": row["track_id"], "event_type": row["event_type"],
+            "person_id": row["person_id"], "person_name": row["person_name"],
             "has_face": bool(row["has_face"]), "face_count": row["face_count"], "confidence": row["confidence"],
             "created_at": row["created_at"], "snapshot_url": f"/api/events/{row['id']}/snapshot" if row["snapshot_path"] else None,
         }
@@ -306,15 +415,35 @@ def _delete_snapshot(relative: str | None) -> None:
         pass
 
 
+def _delete_event_ids(ids: list[int]) -> int:
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    with connection() as conn:
+        rows = conn.execute(
+            f"SELECT id, snapshot_path FROM events WHERE id IN ({marks})",
+            ids,
+        ).fetchall()
+        if rows:
+            found_ids = [int(row["id"]) for row in rows]
+            found_marks = ",".join("?" for _ in found_ids)
+            conn.execute(f"DELETE FROM events WHERE id IN ({found_marks})", found_ids)
+            conn.commit()
+    for row in rows:
+        _delete_snapshot(row["snapshot_path"])
+    return len(rows)
+
+
+@app.post("/api/events/delete-bulk")
+def delete_events_bulk(payload: EventBulkDeleteRequest) -> dict:
+    deleted = _delete_event_ids(payload.ids)
+    return {"ok": True, "deleted": deleted}
+
+
 @app.delete("/api/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_event(event_id: int) -> Response:
-    with connection() as conn:
-        row = conn.execute("SELECT snapshot_path FROM events WHERE id = ?", (event_id,)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Evento não encontrado")
-        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
-        conn.commit()
-    _delete_snapshot(row["snapshot_path"])
+    if _delete_event_ids([event_id]) == 0:
+        raise HTTPException(status_code=404, detail="Evento não encontrado")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
