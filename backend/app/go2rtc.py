@@ -142,6 +142,29 @@ def configure_talkback_stream(stream_name: str, rtsp_url: str) -> Go2RTCResult:
     )
 
 
+def play_file_to_stream(stream_name: str, file_url: str) -> Go2RTCResult:
+    """Ask go2rtc/FFmpeg to send an audio file to a camera backchannel.
+
+    The destination must be the isolated *_talkback stream. This keeps TTS and
+    browser microphone failures independent from the primary video stream.
+    """
+    if not stream_name.endswith("_talkback"):
+        return Go2RTCResult(ok=False, error="Destino de reprodução deve ser um stream de talkback")
+    try:
+        _request(
+            "POST",
+            "/api/ffmpeg",
+            {"dst": stream_name, "file": file_url},
+            timeout=12.0,
+        )
+        return Go2RTCResult(ok=True)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace").strip() or str(exc)
+        return Go2RTCResult(ok=False, error=detail)
+    except Exception as exc:
+        return Go2RTCResult(ok=False, error=str(exc))
+
+
 def delete_stream(stream_name: str) -> Go2RTCResult:
     if not stream_name.endswith("_talkback"):
         _drop_stream_quietly(talkback_stream_name(stream_name))
