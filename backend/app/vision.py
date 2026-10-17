@@ -17,6 +17,7 @@ from .config import (
     VISION_NMS_THRESHOLD,
     VISION_PERSON_CONFIDENCE,
     VISION_PROCESS_FPS,
+    VISION_TRACK_LOW_CONFIDENCE,
 )
 from .db import connection, utc_now
 from .yolox_detector import YoloXPersonDetector
@@ -69,11 +70,14 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     return inter / union if union else 0.0
 
 
-def _update_control_measurement(track: Track, bbox: tuple[int, int, int, int], frame_shape: tuple[int, ...]) -> None:
-    """Reject abrupt/partial boxes and smooth accepted target geometry.
-
-    PTZ should react to a stable target estimate, not directly to every YOLO box.
-    """
+def _update_control_measurement(
+    track: Track,
+    bbox: tuple[int, int, int, int],
+    confidence: float,
+    frame_shape: tuple[int, ...],
+    high_confidence: float,
+) -> None:
+    """Reject abrupt/partial boxes and smooth only trustworthy PTZ measurements."""
     height, width = frame_shape[:2]
     x, y, w, h = bbox
     cx, cy = _center(bbox)
@@ -82,8 +86,8 @@ def _update_control_measurement(track: Track, bbox: tuple[int, int, int, int], f
     if track.smooth_cx is None:
         track.smooth_cx, track.smooth_cy = cx, cy
         track.smooth_w, track.smooth_h = float(w), float(h)
-        track.control_valid = track.hits >= 2
-        track.control_reason = "warming" if not track.control_valid else "ok"
+        track.control_valid = track.hits >= 2 and confidence >= high_confidence
+        track.control_reason = "ok" if track.control_valid else "warming"
         return
 
     jump = math.hypot(cx - track.smooth_cx, cy - track.smooth_cy) / diag
@@ -95,9 +99,10 @@ def _update_control_measurement(track: Track, bbox: tuple[int, int, int, int], f
     edge = x <= width * 0.015 or y <= height * 0.015 or x + w >= width * 0.985 or y + h >= height * 0.985
     partial_edge = edge and area_ratio < 0.66
 
-    reason = "ok"
-    valid = True
-    if track.hits < 2:
+    valid, reason = True, "ok"
+    if confidence < high_confidence:
+        valid, reason = False, "low_confidence"
+    elif track.hits < 2:
         valid, reason = False, "warming"
     elif jump > 0.22:
         valid, reason = False, "center_jump"
@@ -113,7 +118,6 @@ def _update_control_measurement(track: Track, bbox: tuple[int, int, int, int], f
     if not valid:
         return
 
-    # Adaptive EMA: smooth when stable, react faster to real movement.
     alpha = 0.28 if jump < 0.07 else 0.42
     track.smooth_cx = (1 - alpha) * track.smooth_cx + alpha * cx
     track.smooth_cy = (1 - alpha) * track.smooth_cy + alpha * cy
@@ -122,49 +126,92 @@ def _update_control_measurement(track: Track, bbox: tuple[int, int, int, int], f
 
 
 class CentroidTracker:
-    def __init__(self) -> None:
+    """Two-stage association inspired by ByteTrack.
+
+    High-confidence detections can update or create tracks. Low-confidence
+    detections can only rescue an existing track through blur/partial occlusion.
+    """
+
+    def __init__(self, high_confidence: float = VISION_PERSON_CONFIDENCE) -> None:
         self.next_id = 1
         self.tracks: dict[int, Track] = {}
+        self.high_confidence = float(high_confidence)
+
+    @staticmethod
+    def _best_match(
+        track: Track,
+        candidate_indices: set[int],
+        detections: list[tuple[tuple[int, int, int, int], float]],
+        diag: float,
+        *,
+        relaxed: bool,
+    ) -> int | None:
+        best_idx: int | None = None
+        best_score = -1.0
+        tcx, tcy = _center(track.bbox)
+        min_overlap = 0.06 if relaxed else 0.10
+        max_distance = 0.11 if relaxed else 0.13
+        for idx in candidate_indices:
+            bbox, _ = detections[idx]
+            dcx, dcy = _center(bbox)
+            distance = math.hypot(tcx - dcx, tcy - dcy) / max(diag, 1.0)
+            overlap = _iou(track.bbox, bbox)
+            score = overlap * 1.7 + max(0.0, 0.24 - distance)
+            if (overlap >= min_overlap or distance <= max_distance) and score > best_score:
+                best_idx, best_score = idx, score
+        return best_idx
 
     def update(self, detections: list[tuple[tuple[int, int, int, int], float]], frame_shape: tuple[int, ...]) -> list[Track]:
         height, width = frame_shape[:2]
         diag = math.hypot(width, height)
-        unmatched = set(range(len(detections)))
+        high = {i for i, (_, conf) in enumerate(detections) if conf >= self.high_confidence}
+        low = {i for i, (_, conf) in enumerate(detections) if conf < self.high_confidence}
+        unmatched_tracks: list[Track] = []
 
+        # Stage 1: normal/high-confidence association.
         for track in list(self.tracks.values()):
-            best_idx: int | None = None
-            best_score = -1.0
-            tcx, tcy = _center(track.bbox)
-            for idx in unmatched:
-                bbox, _ = detections[idx]
-                dcx, dcy = _center(bbox)
-                distance = math.hypot(tcx - dcx, tcy - dcy) / max(diag, 1.0)
-                overlap = _iou(track.bbox, bbox)
-                score = overlap * 1.7 + max(0.0, 0.24 - distance)
-                if (overlap >= 0.10 or distance <= 0.13) and score > best_score:
-                    best_idx, best_score = idx, score
-
-            if best_idx is None:
-                track.missed += 1
-                track.control_valid = False
-                track.control_reason = "missed"
-                if track.missed > 6:
-                    self.tracks.pop(track.id, None)
+            idx = self._best_match(track, high, detections, diag, relaxed=False)
+            if idx is None:
+                unmatched_tracks.append(track)
                 continue
-
-            bbox, conf = detections[best_idx]
-            unmatched.remove(best_idx)
+            bbox, conf = detections[idx]
+            high.remove(idx)
             track.bbox = bbox
             track.confidence = conf
             track.hits += 1
             track.missed = 0
             track.last_seen_monotonic = time.monotonic()
-            _update_control_measurement(track, bbox, frame_shape)
+            _update_control_measurement(track, bbox, conf, frame_shape, self.high_confidence)
 
-        for idx in unmatched:
+        # Stage 2: low-confidence boxes may preserve identity, but never drive PTZ
+        # and never create a new person.
+        still_unmatched: list[Track] = []
+        for track in unmatched_tracks:
+            idx = self._best_match(track, low, detections, diag, relaxed=True)
+            if idx is None:
+                still_unmatched.append(track)
+                continue
+            bbox, conf = detections[idx]
+            low.remove(idx)
+            track.bbox = bbox
+            track.confidence = conf
+            track.hits += 1
+            track.missed = 0
+            track.last_seen_monotonic = time.monotonic()
+            _update_control_measurement(track, bbox, conf, frame_shape, self.high_confidence)
+
+        for track in still_unmatched:
+            track.missed += 1
+            track.control_valid = False
+            track.control_reason = "missed"
+            if track.missed > 6:
+                self.tracks.pop(track.id, None)
+
+        # Only high-confidence unmatched detections are allowed to create tracks.
+        for idx in high:
             bbox, conf = detections[idx]
             track = Track(self.next_id, bbox, conf)
-            _update_control_measurement(track, bbox, frame_shape)
+            _update_control_measurement(track, bbox, conf, frame_shape, self.high_confidence)
             self.tracks[track.id] = track
             self.next_id += 1
 
@@ -180,7 +227,7 @@ class CameraVisionWorker(threading.Thread):
         self.camera_rtsp_url = camera_rtsp_url
         self.camera_name = camera_name
         self.stop_event = threading.Event()
-        self.tracker = CentroidTracker()
+        self.tracker = CentroidTracker(VISION_PERSON_CONFIDENCE)
         self.last_event_at = 0.0
         self.last_follow_move = 0.0
         self.status = "starting"
@@ -201,7 +248,12 @@ class CameraVisionWorker(threading.Thread):
             self.error = CV_IMPORT_ERROR
             return
         try:
-            detector = YoloXPersonDetector(VISION_MODEL_PATH, confidence=VISION_PERSON_CONFIDENCE, nms_threshold=VISION_NMS_THRESHOLD)
+            detector = YoloXPersonDetector(
+                VISION_MODEL_PATH,
+                confidence=VISION_PERSON_CONFIDENCE,
+                low_confidence=VISION_TRACK_LOW_CONFIDENCE,
+                nms_threshold=VISION_NMS_THRESHOLD,
+            )
         except Exception as exc:
             self.status = "error"
             self.error = f"Falha ao carregar YOLOX ONNX: {exc}"
@@ -261,7 +313,9 @@ class CameraVisionWorker(threading.Thread):
             if associated:
                 track.has_face = True
                 track.face_count = max(track.face_count, len(associated))
-            if track.hits >= 2 and track.event_id is None and time.monotonic() - self.last_event_at >= VISION_EVENT_COOLDOWN_SECONDS:
+            # Low-confidence rescued tracks preserve identity but do not create a
+            # fresh event until a reliable detection has returned.
+            if track.hits >= 2 and track.confidence >= VISION_PERSON_CONFIDENCE and track.event_id is None and time.monotonic() - self.last_event_at >= VISION_EVENT_COOLDOWN_SECONDS:
                 track.event_id = self._save_event(frame, track, associated)
                 self.last_event_at = time.monotonic()
             elif track.event_id and associated and not had_face_before:
