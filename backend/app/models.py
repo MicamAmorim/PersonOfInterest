@@ -93,3 +93,15 @@ class DiscoveryProbeRequest(BaseModel):
         if not value:
             return None
         return value if value.startswith("/") else f"/{value}"
+
+
+class VisionFollowRequest(BaseModel):
+    enabled: bool
+    track_id: int | None = Field(default=None, ge=1)
+
+
+class PTZMoveRequest(BaseModel):
+    pan: float = Field(ge=-1.0, le=1.0)
+    tilt: float = Field(ge=-1.0, le=1.0)
+    speed: float = Field(default=0.55, ge=0.05, le=1.0)
+    duration: float = Field(default=0.35, ge=0.1, le=2.0)
