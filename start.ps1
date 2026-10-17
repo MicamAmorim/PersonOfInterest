@@ -10,6 +10,7 @@ Set-Location $Root
 
 $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
 $Go2rtcExe = Join-Path $Root "bin\go2rtc.exe"
+$RuntimeConfig = Join-Path $Root "data\go2rtc.runtime.yaml"
 
 if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
@@ -20,9 +21,23 @@ $env:FRONTEND_DIR = Join-Path $Root "frontend"
 $env:GO2RTC_API_URL = "http://127.0.0.1:1984"
 $env:GO2RTC_BROWSER_BASE = "direct"
 
+New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
+$runtimeYaml = @'
+api:
+  listen: ":1984"
+rtsp:
+  listen: ":8554"
+webrtc:
+  listen: ":8555"
+streams: {}
+log:
+  level: info
+'@
+[System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
+
 Write-Host "=== PersonOfInterest ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
-$Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "infra\go2rtc\go2rtc.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
+$Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", $RuntimeConfig) -WorkingDirectory $Root -PassThru -NoNewWindow
 
 $Backend = $null
 try {
