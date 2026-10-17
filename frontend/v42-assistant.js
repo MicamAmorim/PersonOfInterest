@@ -17,9 +17,9 @@
     panel.id = 'assistantPanel';
     panel.className = 'panel info-panel';
     panel.innerHTML = `
-      <p class="eyebrow">V4.3 · VOZ NA CÂMERA</p>
+      <p class="eyebrow">V4.4 · TONHO</p>
       <h2>Assistente</h2>
-      <p class="muted paragraph">Cumprimenta pessoas usando a identidade local. Face/manual é confirmação; corpo continua sempre <strong>provável</strong> e o nome é falado como pergunta.</p>
+      <p class="muted paragraph">Cumprimenta pessoas usando a identidade local. Face/manual é confirmação; corpo continua sempre <strong>provável</strong>. Opcionalmente, a câmera também pode ouvir a frase <strong>“Oi, Tonho!”</strong>.</p>
 
       <div class="assistant-active-block">
         <div class="assistant-active-heading"><strong>Assistentes ativos</strong><span id="assistantActiveCount" class="muted">0</span></div>
@@ -47,6 +47,11 @@
         <span><strong>Assistente ligado</strong><small>Fala somente para novos eventos depois de ser ativado.</small></span>
         <input id="assistantEnabled" type="checkbox" />
       </label>
+      <label class="switch-row assistant-switch tonho-switch">
+        <span><strong>Escutar “Oi, Tonho!”</strong><small>Transcrição local pelo Whisper. Ao reconhecer a frase, responde “Oi!” e usa a identidade recente daquela câmera quando disponível.</small></span>
+        <input id="assistantWakeEnabled" type="checkbox" />
+      </label>
+      <p id="assistantWakeStatusText" class="field-help">Tonho: aguardando configuração…</p>
       <p id="assistantStatusText" class="field-help">Carregando assistente…</p>
       <div class="push-actions">
         <button class="button primary" type="button" id="assistantSaveBtn">Salvar assistente</button>
@@ -57,6 +62,7 @@
     grid.appendChild(panel);
 
     document.getElementById('assistantCamera')?.addEventListener('change', renderSelectedAssistant);
+    document.getElementById('assistantEnabled')?.addEventListener('change', syncWakeAvailability);
     document.getElementById('assistantSaveBtn')?.addEventListener('click', saveAssistantSettings);
     document.getElementById('assistantTestBtn')?.addEventListener('click', testAssistantVoice);
     document.getElementById('assistantRefreshBtn')?.addEventListener('click', loadAssistantSettings);
@@ -91,8 +97,9 @@
     list.innerHTML = active.map(item => {
       const voice = item.voice_gender === 'male' ? 'Antonio · masculina' : 'Francisca · feminina';
       const interval = Number(item.interval_minutes || 30);
+      const wake = item.wake_enabled ? ' · 🎙 Oi, Tonho ativo' : '';
       return `<div class="assistant-active-row" data-assistant-active-camera="${item.camera_id}">
-        <div><strong>${escapeHtml(item.camera_name || `Câmera ${item.camera_id}`)}</strong><span>${escapeHtml(voice)} · ${interval} min · ${escapeHtml(item.timezone || 'UTC')}</span></div>
+        <div><strong>${escapeHtml(item.camera_name || `Câmera ${item.camera_id}`)}</strong><span>${escapeHtml(voice)} · ${interval} min · ${escapeHtml(item.timezone || 'UTC')}${wake}</span></div>
         <button class="button ghost small" type="button">Configurar</button>
       </div>`;
     }).join('');
@@ -107,20 +114,56 @@
     });
   }
 
+  function syncWakeAvailability() {
+    const enabled = document.getElementById('assistantEnabled');
+    const wake = document.getElementById('assistantWakeEnabled');
+    if (!enabled || !wake) return;
+    wake.disabled = !enabled.checked;
+    if (!enabled.checked) wake.checked = false;
+  }
+
+  function renderWakeStatus(setting) {
+    const el = document.getElementById('assistantWakeStatusText');
+    if (!el) return;
+    const wake = state.assistantStatus?.wake_word;
+    if (!setting?.wake_enabled) {
+      el.textContent = 'Tonho: escuta desligada nesta câmera.';
+      return;
+    }
+    if (!wake) {
+      el.textContent = 'Tonho: status indisponível.';
+      return;
+    }
+    if (!wake.available) {
+      el.textContent = `Tonho indisponível: ${wake.runtime_error || 'runtime de voz não carregado'}`;
+      return;
+    }
+    const cameraState = wake.cameras?.[String(setting.camera_id)] || wake.cameras?.[setting.camera_id];
+    const status = cameraState?.status || wake.status || 'iniciando';
+    const heard = cameraState?.last_transcript ? ` · ouvi: “${cameraState.last_transcript}”` : '';
+    const answer = cameraState?.last_response ? ` · respondi: “${cameraState.last_response}”` : '';
+    const error = cameraState?.error ? ` · ${cameraState.error}` : '';
+    el.textContent = `Tonho: ${status} · frase “${wake.phrase || 'Oi, Tonho!'}” · Whisper ${wake.model || 'tiny'}${heard}${answer}${error}`;
+  }
+
   function renderSelectedAssistant() {
     const setting = selectedSetting();
     const enabled = document.getElementById('assistantEnabled');
+    const wake = document.getElementById('assistantWakeEnabled');
     const interval = document.getElementById('assistantInterval');
     const voice = document.getElementById('assistantVoice');
     const timezone = document.getElementById('assistantTimezone');
-    if (!enabled || !interval || !voice || !timezone) return;
+    if (!enabled || !wake || !interval || !voice || !timezone) return;
 
     enabled.checked = Boolean(setting?.enabled);
+    wake.checked = Boolean(setting?.wake_enabled && setting?.enabled);
     interval.value = String(setting?.interval_minutes || 30);
     voice.value = setting?.voice_gender || 'female';
     timezone.value = setting?.updated_at
       ? (setting.timezone || browserTimezone())
       : browserTimezone();
+    syncWakeAvailability();
+    renderWakeStatus(setting);
 
     const status = document.getElementById('assistantStatusText');
     if (!status) return;
@@ -162,11 +205,13 @@
     }
     const button = document.getElementById('assistantSaveBtn');
     if (button) button.disabled = true;
+    const enabled = Boolean(document.getElementById('assistantEnabled')?.checked);
     const payload = {
-      enabled: Boolean(document.getElementById('assistantEnabled')?.checked),
+      enabled,
       interval_minutes: Number(document.getElementById('assistantInterval')?.value || 30),
       voice_gender: document.getElementById('assistantVoice')?.value || 'female',
       timezone: document.getElementById('assistantTimezone')?.value.trim() || browserTimezone(),
+      wake_enabled: enabled && Boolean(document.getElementById('assistantWakeEnabled')?.checked),
     };
     try {
       const saved = await api(`/api/assistant/cameras/${cameraId}`, {
@@ -178,7 +223,11 @@
       else state.assistantSettings.push(saved);
       renderActiveAssistants();
       renderSelectedAssistant();
-      if (!quiet) toast(saved.enabled ? 'Assistente ligado e configurações salvas.' : 'Assistente desligado e configurações salvas.');
+      if (!quiet) {
+        const wakeText = saved.wake_enabled ? ' Escuta “Oi, Tonho!” ativa.' : '';
+        toast(saved.enabled ? `Assistente ligado e configurações salvas.${wakeText}` : 'Assistente desligado e configurações salvas.');
+      }
+      setTimeout(loadAssistantSettings, 900);
       return true;
     } catch (error) {
       toast(`Assistente: ${error.message}`, 'error');
