@@ -13,6 +13,7 @@ import websockets
 from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 
+from . import go2rtc
 from .alerts import manager as alert_manager
 from .body_identity import manager as body_identity_manager
 from .config import FACES_DIR, GO2RTC_API_URL
@@ -73,13 +74,35 @@ async def _bridge_websocket(websocket: WebSocket, upstream_url: str) -> None:
 
 @router.websocket("/api/cameras/{camera_id}/webrtc/ws")
 async def camera_webrtc_proxy(websocket: WebSocket, camera_id: int) -> None:
-    """Same-origin go2rtc signaling for camera audio/talkback."""
+    """Same-origin go2rtc signaling for camera audio and isolated talkback."""
     with connection() as conn:
-        row = conn.execute("SELECT stream_name FROM cameras WHERE id = ?", (camera_id,)).fetchone()
+        row = conn.execute(
+            "SELECT stream_name, rtsp_url FROM cameras WHERE id = ? AND enabled = 1",
+            (camera_id,),
+        ).fetchone()
     if row is None:
         await websocket.close(code=4404)
         return
-    upstream_url = f"ws://127.0.0.1:1984/api/ws?src={quote(row['stream_name'])}"
+
+    use_talkback = (websocket.query_params.get("talkback") or "") == "1"
+    stream_name = str(row["stream_name"])
+    if use_talkback:
+        result = await asyncio.to_thread(
+            go2rtc.configure_talkback_stream,
+            stream_name,
+            str(row["rtsp_url"]),
+        )
+        if not result.ok:
+            await websocket.accept()
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "value": f"Talkback DVRIP indisponível: {result.error or 'falha desconhecida'}",
+            }))
+            await websocket.close(code=1011)
+            return
+        stream_name = go2rtc.talkback_stream_name(stream_name)
+
+    upstream_url = f"ws://127.0.0.1:1984/api/ws?src={quote(stream_name)}"
     await _bridge_websocket(websocket, upstream_url)
 
 
