@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from typing import Any
 
 from . import body_identity as bi
@@ -13,8 +14,10 @@ from .db import connection, utc_now
 def _extract_face_reference(event: dict[str, Any], person_id: int) -> bool:
     """Create a verified face sample for a manually confirmed event when possible.
 
-    A separate YuNet/SFace instance is used here so manual review cannot race the
-    background identity worker's mutable detector input size.
+    A separate YuNet/SFace instance is used so manual review cannot race the
+    background identity worker's mutable detector input size. When the event has
+    a person bounding box, only faces whose center lies inside that box are
+    eligible; this prevents learning another person's face from the same frame.
     """
     path = fi._event_snapshot_path(event.get("snapshot_path"))
     if path is None or fi.cv2 is None:
@@ -50,9 +53,12 @@ def _extract_face_reference(event: dict[str, Any], person_id: int) -> bool:
 
         bbox = None
         try:
-            bbox = json.loads(event.get("bbox_json") or "{}")
+            parsed = json.loads(event.get("bbox_json") or "{}")
+            if float(parsed.get("w", 0)) > 0 and float(parsed.get("h", 0)) > 0:
+                bbox = parsed
         except Exception:
             bbox = None
+
         candidates = []
         if bbox:
             x, y = float(bbox.get("x", 0)), float(bbox.get("y", 0))
@@ -62,10 +68,12 @@ def _extract_face_reference(event: dict[str, Any], person_id: int) -> bool:
                 cy = float(face[1] + face[3] / 2)
                 if x <= cx <= x + w and y <= cy <= y + h:
                     candidates.append(face)
-        if not candidates:
+            if not candidates:
+                return False
+        else:
             candidates = list(faces)
-        face = max(candidates, key=lambda f: float(f[-1]) * max(1.0, float(f[2] * f[3])))
 
+        face = max(candidates, key=lambda f: float(f[-1]) * max(1.0, float(f[2] * f[3])))
         aligned = recognizer.alignCrop(frame, face)
         embedding = fi._normalize(recognizer.feature(aligned))
         score = float(face[-1])
@@ -102,6 +110,37 @@ def _extract_face_reference(event: dict[str, Any], person_id: int) -> bool:
         return False
 
 
+def _assistant_payload(event_id: int) -> dict[str, Any] | None:
+    assistant_manager.ensure_schema()
+    with connection() as conn:
+        row = conn.execute(
+            """SELECT e.*, c.name AS camera_name, c.stream_name, c.rtsp_url, c.sync_status,
+                s.interval_minutes, s.voice_gender, s.timezone, s.updated_at AS assistant_updated_at,
+                p.name AS person_name, pp.name AS probable_person_name,
+                fs.quality AS face_quality
+            FROM events e
+            JOIN cameras c ON c.id = e.camera_id
+            JOIN camera_assistant_settings s ON s.camera_id = e.camera_id AND s.enabled = 1
+            LEFT JOIN persons p ON p.id = e.person_id
+            LEFT JOIN persons pp ON pp.id = e.probable_person_id
+            LEFT JOIN face_samples fs ON fs.event_id = e.id
+            WHERE e.id = ?""",
+            (event_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _reconsider_assistant(event_id: int) -> None:
+    """Re-evaluate one manually confirmed event even if it was already consumed."""
+    try:
+        payload = _assistant_payload(event_id)
+        if payload is None:
+            return
+        assistant_manager._handle_event(payload)
+    except Exception as exc:
+        assistant_manager.error = f"Reavaliação após cadastro manual: {exc}"
+
+
 def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
     original = getattr(type(self), "_poi_original_confirm_event_identity")
     original(self, event_id, person_id)
@@ -116,9 +155,8 @@ def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
         return
     event = dict(event_row)
 
-    # Existing face embeddings are authoritative training examples after a
-    # manual correction. If identity indexing has not produced one yet, try to
-    # extract it immediately from the event snapshot.
+    # Existing face embeddings become verified references after a manual
+    # correction. If indexing has not produced one yet, try to extract it now.
     face_reference = face_row is not None
     if face_reference:
         with connection() as conn:
@@ -130,6 +168,9 @@ def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
     else:
         face_reference = _extract_face_reference(event, person_id)
 
+    # The same manual confirmation also reinforces appearance ReID. This never
+    # promotes future body matches to absolute identity: it only creates a
+    # verified reference used by probable_person_id scoring.
     source = "face_verified_manual" if face_reference else "manual_verified"
     body_reference = False
     with connection() as conn:
@@ -178,10 +219,6 @@ def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
         except Exception as exc:
             self.error = f"Referência corporal manual pendente: {exc}"
 
-    # Manual confirmation is authoritative. Clear any remaining probable-body
-    # label, then reopen this recent event for the voice assistant. This fixes
-    # the case where the assistant already consumed an event as unknown before
-    # the user created/selected the person's identity.
     with connection() as conn:
         conn.execute(
             """UPDATE events SET person_id = ?, probable_person_id = NULL,
@@ -192,25 +229,22 @@ def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
         )
         conn.commit()
 
+    # Re-run assistant logic on this event in a daemon thread. The normal poller
+    # may already have consumed it as unknown/no-face; direct reconsideration
+    # lets a newly created person receive their first turn greeting immediately.
     try:
-        assistant_manager.ensure_schema()
-        with connection() as conn:
-            enabled = conn.execute(
-                """SELECT 1 FROM events e
-                JOIN camera_assistant_settings s ON s.camera_id = e.camera_id
-                WHERE e.id = ? AND s.enabled = 1""",
-                (event_id,),
-            ).fetchone()
-            if enabled:
-                conn.execute("DELETE FROM assistant_event_state WHERE event_id = ?", (event_id,))
-                conn.commit()
-        if enabled:
-            assistant_manager.notify_change()
+        payload = _assistant_payload(event_id)
+        if payload is not None:
+            thread = threading.Thread(
+                target=_reconsider_assistant,
+                args=(event_id,),
+                name=f"poi-assistant-manual-{event_id}",
+                daemon=True,
+            )
+            thread.start()
     except Exception:
         pass
 
-    # Expose the learning result for diagnostics without changing the API return
-    # contract of confirm_event_identity (which is intentionally None).
     self._last_manual_learning = {
         "event_id": event_id,
         "person_id": person_id,
