@@ -27,27 +27,27 @@ if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
 }
 
-Write-Host "Verificando dependencias da V4.1..." -ForegroundColor DarkGray
+Write-Host "Verificando dependencias da V4.2..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $PythonExe -c "import cv2,numpy,onnxruntime,websockets,pywebpush,cryptography,sys; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); ok=int(cv2.__version__.split('.')[0])<5 and hasattr(cv2,'FaceDetectorYN_create') and hasattr(cv2,'FaceRecognizerSF_create'); sys.exit(0 if ok else 2)" *> $null
+    & $PythonExe -c "import cv2,numpy,onnxruntime,websockets,pywebpush,cryptography,edge_tts,sys; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); ok=int(cv2.__version__.split('.')[0])<5 and hasattr(cv2,'FaceDetectorYN_create') and hasattr(cv2,'FaceRecognizerSF_create'); sys.exit(0 if ok else 2)" *> $null
     $depsExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $oldErrorActionPreference
 }
 
 if ($depsExitCode -ne 0) {
-    Write-Host "Ajustando dependencias de visao, identidade, fusos horarios e Web Push..." -ForegroundColor Yellow
+    Write-Host "Ajustando dependencias de visao, identidade, assistente, fusos horarios e Web Push..." -ForegroundColor Yellow
     & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao instalar as dependencias da V4.1."
+        throw "Falha ao instalar as dependencias da V4.2."
     }
 }
 
-& $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Timezone DB OK | Web Push OK')"
+& $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography,edge_tts; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Edge TTS OK | Timezone DB OK | Web Push OK')"
 if ($LASTEXITCODE -ne 0) {
-    throw "Dependencias da V4.1 nao estao compativeis."
+    throw "Dependencias da V4.2 nao estao compativeis."
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
@@ -97,7 +97,7 @@ log:
 '@
 [System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
 
-Write-Host "=== PersonOfInterest V4.1 ===" -ForegroundColor Cyan
+Write-Host "=== PersonOfInterest V4.2 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
@@ -117,7 +117,7 @@ try {
         throw "go2rtc nao respondeu na porta 1984."
     }
 
-    Write-Host "Iniciando API, identidade facial/corporal, alertas, timeline e visao em http://localhost:8080 ..."
+    Write-Host "Iniciando API, identidade facial/corporal, assistente, alertas, timeline e visao em http://localhost:8080 ..."
     $Backend = Start-Process -FilePath $PythonExe -ArgumentList @(
         "-m", "uvicorn", "app.main:app",
         "--app-dir", "backend",
@@ -142,7 +142,7 @@ try {
         throw "O backend nao respondeu na porta 8080."
     }
 
-    Write-Host "PersonOfInterest V4.1 online: http://localhost:8080" -ForegroundColor Green
+    Write-Host "PersonOfInterest V4.2 online: http://localhost:8080" -ForegroundColor Green
     Write-Host "Para acesso seguro no celular: .\tailscale-serve.ps1" -ForegroundColor DarkGray
     Write-Host "Pressione Ctrl+C para encerrar." -ForegroundColor DarkGray
     if (-not $NoBrowser) {
