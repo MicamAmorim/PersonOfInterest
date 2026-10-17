@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -12,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, WebSoc
 from fastapi.responses import FileResponse
 
 from .alerts import manager as alert_manager
+from .config import GO2RTC_API_URL
 from .db import connection, utc_now
 from .identity import manager as identity_manager
 from .models import AlertRuleCreate, AlertRuleUpdate, IdentityAssignRequest, PushSubscriptionRequest
@@ -28,27 +31,14 @@ def _camera_row(camera_id: int):
     return row
 
 
-@router.websocket("/api/cameras/{camera_id}/webrtc/ws")
-async def camera_webrtc_proxy(websocket: WebSocket, camera_id: int) -> None:
-    """Same-origin WS proxy so WebRTC works through Tailscale Serve/HTTPS.
-
-    The browser never needs direct access to go2rtc :1984. This is important for
-    installed mobile PWAs where mixed-content and a second HTTPS port would fail.
-    """
-    with connection() as conn:
-        row = conn.execute("SELECT stream_name FROM cameras WHERE id = ?", (camera_id,)).fetchone()
-    if row is None:
-        await websocket.close(code=4404)
-        return
+async def _bridge_websocket(websocket: WebSocket, upstream_url: str) -> None:
     await websocket.accept()
-    upstream_url = f"ws://127.0.0.1:1984/api/ws?src={quote(row['stream_name'])}"
     try:
         async with websockets.connect(upstream_url, max_size=None) as upstream:
             async def client_to_upstream() -> None:
                 while True:
                     message = await websocket.receive()
-                    kind = message.get("type")
-                    if kind == "websocket.disconnect":
+                    if message.get("type") == "websocket.disconnect":
                         return
                     if message.get("text") is not None:
                         await upstream.send(message["text"])
@@ -78,6 +68,71 @@ async def camera_webrtc_proxy(websocket: WebSocket, camera_id: int) -> None:
             await websocket.close(code=1011)
         except Exception:
             pass
+
+
+@router.websocket("/api/cameras/{camera_id}/webrtc/ws")
+async def camera_webrtc_proxy(websocket: WebSocket, camera_id: int) -> None:
+    """Same-origin go2rtc signaling for camera audio/talkback."""
+    with connection() as conn:
+        row = conn.execute("SELECT stream_name FROM cameras WHERE id = ?", (camera_id,)).fetchone()
+    if row is None:
+        await websocket.close(code=4404)
+        return
+    upstream_url = f"ws://127.0.0.1:1984/api/ws?src={quote(row['stream_name'])}"
+    await _bridge_websocket(websocket, upstream_url)
+
+
+_GO2RTC_PLAYER_ASSETS = {
+    "stream.html": "text/html; charset=utf-8",
+    "video-stream.js": "application/javascript; charset=utf-8",
+    "video-rtc.js": "application/javascript; charset=utf-8",
+}
+
+
+def _read_go2rtc_asset(asset_name: str) -> bytes:
+    url = f"{GO2RTC_API_URL}/{asset_name}"
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=4.0) as response:
+        return response.read()
+
+
+@router.get("/go2rtc/{asset_name}", include_in_schema=False)
+async def go2rtc_player_asset(asset_name: str) -> Response:
+    """Expose only go2rtc's universal player assets through the app origin.
+
+    The universal player can choose MSE for H.265 cameras instead of forcing
+    browser WebRTC, while still working behind Tailscale Serve/HTTPS.
+    """
+    content_type = _GO2RTC_PLAYER_ASSETS.get(asset_name)
+    if content_type is None:
+        raise HTTPException(status_code=404, detail="Recurso go2rtc não permitido")
+    try:
+        body = await asyncio.to_thread(_read_go2rtc_asset, asset_name)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"go2rtc indisponível: {exc}") from exc
+    return Response(content=body, headers={"Content-Type": content_type, "Cache-Control": "no-cache"})
+
+
+@router.websocket("/go2rtc/api/ws")
+async def go2rtc_stream_proxy(websocket: WebSocket) -> None:
+    """Proxy the official go2rtc universal player's WS/MSE/WebRTC channel.
+
+    Only stream names belonging to enabled PersonOfInterest cameras are allowed.
+    """
+    src = (websocket.query_params.get("src") or "").strip()
+    if not src:
+        await websocket.close(code=4400)
+        return
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT stream_name FROM cameras WHERE stream_name = ? AND enabled = 1",
+            (src,),
+        ).fetchone()
+    if row is None:
+        await websocket.close(code=4404)
+        return
+    upstream_url = f"ws://127.0.0.1:1984/api/ws?src={quote(src)}"
+    await _bridge_websocket(websocket, upstream_url)
 
 
 # ------------------------------- V3 identity -------------------------------
@@ -213,7 +268,7 @@ def create_alert_rule(payload: AlertRuleCreate) -> dict:
     try:
         ZoneInfo(payload.timezone)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Fuso horário inválido") from exc
+        raise HTTPException(status_code=400, detail=f"Fuso horário inválido: {payload.timezone}") from exc
     if payload.camera_id is not None:
         _camera_row(payload.camera_id)
     with connection() as conn:
@@ -250,7 +305,7 @@ def update_alert_rule(rule_id: int, payload: AlertRuleUpdate) -> dict:
         try:
             ZoneInfo(timezone_name)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail="Fuso horário inválido") from exc
+            raise HTTPException(status_code=400, detail=f"Fuso horário inválido: {timezone_name}") from exc
         if merged.get("unknown_only") and merged.get("person_id") is not None:
             raise HTTPException(status_code=400, detail="Escolha desconhecidos OU uma pessoa específica")
         if bool(merged.get("start_time")) != bool(merged.get("end_time")):
