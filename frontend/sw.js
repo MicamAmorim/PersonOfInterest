@@ -1,4 +1,4 @@
-const CACHE = 'personofinterest-v4.0.3';
+const CACHE = 'personofinterest-v4.0.4';
 const SHELL = ['/', '/styles.css', '/v2.css', '/v34.css', '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/camera-webrtc.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
