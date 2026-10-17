@@ -45,7 +45,7 @@ def _security_header(username: str, password: str) -> str:
     nonce64 = base64.b64encode(nonce).decode()
     return f"""
     <s:Header>
-      <wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-open-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+      <wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
         <wsse:UsernameToken>
           <wsse:Username>{escape(username)}</wsse:Username>
           <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{digest}</wsse:Password>
@@ -127,18 +127,11 @@ def probe(rtsp_url: str) -> dict:
 
 
 def logical_to_onvif(pan: float, tilt: float) -> tuple[float, float]:
-    """Map UI/world directions to the axis orientation used by these iCSee/XM cameras.
+    """Convert PersonOfInterest directions to the tested iCSee ONVIF axes.
 
-    PersonOfInterest logical coordinates:
-      pan  +1 = right, -1 = left
-      tilt +1 = up,    -1 = down
-
-    The tested iCSee firmware exposes ONVIF PanTilt rotated by 90 degrees:
-      ONVIF x+ moves the camera down
-      ONVIF y+ moves the camera right
-
-    Therefore: device_x = -logical_tilt, device_y = logical_pan.
-    Keeping the transform here makes manual joystick and auto-follow consistent.
+    Logical coordinates use pan +right/-left and tilt +up/-down.
+    On the tested iCSee/XM firmware, ONVIF x+ moved down and y+ moved right,
+    therefore device_x = -logical_tilt and device_y = logical_pan.
     """
     logical_pan = max(-1.0, min(1.0, float(pan)))
     logical_tilt = max(-1.0, min(1.0, float(tilt)))
