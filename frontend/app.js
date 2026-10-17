@@ -7,6 +7,13 @@ function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 }
 
+function resolveViewerUrl(raw) {
+  const prefix = '/__go2rtc_direct__/';
+  if (!raw || !raw.startsWith(prefix)) return raw;
+  const path = raw.slice(prefix.length);
+  return `http://${window.location.hostname}:1984/${path}`;
+}
+
 function toast(message, type = 'ok') {
   const el = $('#toast');
   el.textContent = message;
@@ -79,7 +86,7 @@ function render() {
 function cameraCard(camera) {
   const [label, cls] = statusLabel(camera);
   const preview = camera.enabled && camera.sync_status === 'ok'
-    ? `<iframe src="${camera.viewer_url}" title="${escapeHtml(camera.name)}" loading="lazy" allow="autoplay"></iframe><span class="live-badge">LIVE</span>`
+    ? `<iframe src="${resolveViewerUrl(camera.viewer_url)}" title="${escapeHtml(camera.name)}" loading="lazy" allow="autoplay"></iframe><span class="live-badge">LIVE</span>`
     : `<div class="camera-preview disabled"><span>${camera.sync_status === 'error' ? 'Stream indisponível' : 'Câmera desativada'}</span></div>`;
   return `
     <article class="camera-card" data-id="${camera.id}">
@@ -198,7 +205,7 @@ function openViewer(id) {
   }
   $('#viewerTitle').textContent = camera.name;
   $('#viewerLocation').textContent = camera.location || '';
-  $('#viewerFrame').src = camera.viewer_url;
+  $('#viewerFrame').src = resolveViewerUrl(camera.viewer_url);
   $('#viewerDialog').showModal();
 }
 
