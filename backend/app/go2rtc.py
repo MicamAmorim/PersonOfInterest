@@ -7,6 +7,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from . import discovery
 from .config import GO2RTC_API_URL
 
 
@@ -57,6 +58,13 @@ def _stream_exists(stream_name: str) -> bool:
         return False
 
 
+def _drop_stream_quietly(stream_name: str) -> None:
+    try:
+        _request("DELETE", "/api/streams", {"src": stream_name}, timeout=2.0)
+    except Exception:
+        pass
+
+
 def talkback_stream_name(stream_name: str) -> str:
     return f"{stream_name}_talkback"
 
@@ -84,6 +92,41 @@ def dvrip_backchannel_url(rtsp_url: str) -> str | None:
         return None
 
 
+def _validate_primary_rtsp(rtsp_url: str) -> Go2RTCResult:
+    """Authenticate against the exact configured RTSP endpoint before go2rtc.
+
+    go2rtc accepts stream definitions lazily, so PUT /api/streams succeeding does
+    not prove that the camera accepted credentials. Without a preflight, a bad
+    password causes both go2rtc and the CV restream consumer to retry every
+    second. Validate once here and keep an invalid camera in sync_status=error
+    until the user edits/resyncs it.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(rtsp_url)
+        if parsed.scheme.lower() != "rtsp" or not parsed.hostname:
+            return Go2RTCResult(False, "URL RTSP inválida")
+        port = int(parsed.port or 554)
+        username = urllib.parse.unquote(parsed.username or "")
+        password = urllib.parse.unquote(parsed.password or "")
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        result = discovery.probe_rtsp(
+            parsed.hostname,
+            username=username,
+            password=password,
+            port=port,
+            paths=(path,),
+        )
+        if result.ok:
+            return Go2RTCResult(True)
+        if result.status_code == 401:
+            return Go2RTCResult(False, "RTSP: usuário ou senha recusados pela câmera")
+        return Go2RTCResult(False, f"RTSP: {result.error or 'não foi possível abrir o stream'}")
+    except Exception as exc:
+        return Go2RTCResult(False, f"RTSP: falha ao validar o stream ({exc})")
+
+
 def upsert_stream(
     stream_name: str,
     rtsp_url: str,
@@ -93,8 +136,18 @@ def upsert_stream(
     # an extra source for the primary stream. Ignore extras there so an optional
     # talkback authentication failure can never poison normal video/vision.
     # Dedicated *_talkback streams are the only streams allowed to use extras.
+    is_talkback = stream_name.endswith("_talkback")
+    if not is_talkback:
+        validation = _validate_primary_rtsp(rtsp_url)
+        if not validation.ok:
+            # Remove any previously configured runtime stream so viewers/CV do
+            # not keep reconnecting to a known-bad source.
+            _drop_stream_quietly(stream_name)
+            _drop_stream_quietly(talkback_stream_name(stream_name))
+            return validation
+
     sources = [rtsp_url]
-    if stream_name.endswith("_talkback"):
+    if is_talkback:
         for source in extra_sources or ():
             if source and source not in sources:
                 sources.append(source)
@@ -128,6 +181,10 @@ def configure_talkback_stream(stream_name: str, rtsp_url: str) -> Go2RTCResult:
 
 
 def delete_stream(stream_name: str) -> Go2RTCResult:
+    # A camera's auxiliary talkback stream must not survive deletion/disable of
+    # the primary stream.
+    if not stream_name.endswith("_talkback"):
+        _drop_stream_quietly(talkback_stream_name(stream_name))
     try:
         _request("DELETE", "/api/streams", {"src": stream_name})
         return Go2RTCResult(ok=True)
