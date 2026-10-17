@@ -43,10 +43,21 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_cameras_enabled
                 ON cameras(enabled);
 
+            CREATE TABLE IF NOT EXISTS persons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_persons_name
+                ON persons(name COLLATE NOCASE);
+
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 camera_id INTEGER NOT NULL,
                 track_id INTEGER,
+                person_id INTEGER,
                 event_type TEXT NOT NULL DEFAULT 'person',
                 has_face INTEGER NOT NULL DEFAULT 0,
                 face_count INTEGER NOT NULL DEFAULT 0,
@@ -54,13 +65,16 @@ def init_db() -> None:
                 snapshot_path TEXT,
                 bbox_json TEXT,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+                FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+                FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE SET NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_camera_created
                 ON events(camera_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_created
                 ON events(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_person_created
+                ON events(person_id, created_at DESC);
 
             CREATE TABLE IF NOT EXISTS camera_runtime_settings (
                 camera_id INTEGER PRIMARY KEY,
@@ -82,6 +96,12 @@ def init_db() -> None:
         )
         _ensure_column(
             conn,
+            "events",
+            "person_id",
+            "person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL",
+        )
+        _ensure_column(
+            conn,
             "camera_runtime_settings",
             "home_preset_set",
             "home_preset_set INTEGER NOT NULL DEFAULT 0",
@@ -91,6 +111,9 @@ def init_db() -> None:
             "camera_runtime_settings",
             "autofollow_max_speed",
             "autofollow_max_speed REAL NOT NULL DEFAULT 0.65",
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_person_created ON events(person_id, created_at DESC)"
         )
         conn.execute(
             """
