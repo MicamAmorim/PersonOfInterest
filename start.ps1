@@ -18,13 +18,28 @@ if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
 }
 
 Write-Host "Verificando dependencias da V2..." -ForegroundColor DarkGray
-& $PythonExe -c "import cv2, numpy" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Instalando dependencias de visao computacional..." -ForegroundColor Yellow
-    & $PipExe install -r (Join-Path $Root "backend\requirements.txt")
+$oldErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    & $PythonExe -c "import cv2, numpy" *> $null
+    $visionDepsExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+}
+
+if ($visionDepsExitCode -ne 0) {
+    Write-Host "Dependencias de visao nao encontradas. Instalando..." -ForegroundColor Yellow
+    & $PythonExe -m pip install -r (Join-Path $Root "backend\requirements.txt")
     if ($LASTEXITCODE -ne 0) {
         throw "Falha ao instalar as dependencias da V2."
     }
+
+    & $PythonExe -c "import cv2, numpy; print('OpenCV', cv2.__version__, '| NumPy', numpy.__version__)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "As dependencias foram instaladas, mas OpenCV/NumPy ainda nao puderam ser importados."
+    }
+} else {
+    Write-Host "OpenCV e NumPy OK." -ForegroundColor DarkGray
 }
 
 $env:DATA_DIR = Join-Path $Root "data"
