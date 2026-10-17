@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +20,13 @@ class AssistantSettingsUpdate(BaseModel):
     voice_gender: Literal["female", "male"] = "female"
     timezone: str = Field(default="UTC", min_length=1, max_length=80)
     wake_enabled: bool = False
+
+
+def _warm_wake_model() -> None:
+    try:
+        wake_word_manager._ensure_model()
+    except Exception as exc:
+        wake_word_manager.error = str(exc)
 
 
 @router.get("/api/assistant/status")
@@ -44,6 +52,8 @@ def update_assistant_camera(camera_id: int, payload: AssistantSettingsUpdate) ->
             timezone_name=payload.timezone,
         )
         wake_word_manager.update_setting(camera_id, payload.wake_enabled)
+        if payload.enabled and payload.wake_enabled and wake_word_manager.available:
+            threading.Thread(target=_warm_wake_model, name="poi-wake-model-warmup", daemon=True).start()
         return wake_word_manager.enrich_settings([saved])[0]
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
