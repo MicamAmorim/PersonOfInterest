@@ -15,30 +15,20 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <img src="/icon.svg" alt="" />
-        <div><strong>PersonOfInterest</strong><span>Local surveillance</span></div>
-      </div>
+      <div class="brand"><img src="/icon.svg" alt="" /><div><strong>PersonOfInterest</strong><span>Local surveillance</span></div></div>
       <nav>
         <button class="nav-item active" data-view="dashboard"><span>▦</span> Visão geral</button>
         <button class="nav-item" data-view="cameras"><span>◉</span> Câmeras</button>
         <button class="nav-item" data-view="timeline"><span>◷</span> Timeline</button>
         <button class="nav-item" data-view="settings"><span>⚙</span> Sistema</button>
       </nav>
-      <div class="sidebar-status">
-        <span class="status-dot" id="systemDot"></span>
-        <div><strong id="systemStatus">Verificando…</strong><span id="systemDetail">backend / go2rtc / vision</span></div>
-      </div>
+      <div class="sidebar-status"><span class="status-dot" id="systemDot"></span><div><strong id="systemStatus">Verificando…</strong><span id="systemDetail">backend / go2rtc / vision</span></div></div>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div><p class="eyebrow">NVR LOCAL · V2</p><h1 id="pageTitle">Visão geral</h1></div>
-        <div class="top-actions">
-          <button class="button ghost" id="refreshBtn">↻ Atualizar</button>
-          <button class="button ghost" id="discoverBtn">⌁ Descobrir câmeras</button>
-          <button class="button primary" id="addCameraBtn">＋ Nova câmera</button>
-        </div>
+        <div class="top-actions"><button class="button ghost" id="refreshBtn">↻ Atualizar</button><button class="button ghost" id="discoverBtn">⌁ Descobrir câmeras</button><button class="button primary" id="addCameraBtn">＋ Nova câmera</button></div>
       </header>
 
       <section id="dashboardView" class="view active">
@@ -50,25 +40,18 @@
         </div>
         <div class="section-heading"><div><p class="eyebrow">AO VIVO</p><h2>Câmeras</h2></div><span class="muted">Clique em uma câmera para ampliar</span></div>
         <div id="cameraGrid" class="camera-grid"></div>
-        <div id="emptyState" class="empty-state hidden">
-          <div class="empty-icon">◉</div><h3>Nenhuma câmera cadastrada</h3>
-          <p>Descubra câmeras RTSP/ONVIF na rede ou adicione uma URL manualmente.</p>
-          <div class="empty-actions"><button class="button ghost" id="emptyDiscoverBtn">Descobrir na rede</button><button class="button primary" id="emptyAddBtn">Adicionar manualmente</button></div>
-        </div>
+        <div id="emptyState" class="empty-state hidden"><div class="empty-icon">◉</div><h3>Nenhuma câmera cadastrada</h3><p>Descubra câmeras RTSP/ONVIF na rede ou adicione uma URL manualmente.</p><div class="empty-actions"><button class="button ghost" id="emptyDiscoverBtn">Descobrir na rede</button><button class="button primary" id="emptyAddBtn">Adicionar manualmente</button></div></div>
       </section>
 
       <section id="camerasView" class="view">
-        <div class="panel">
-          <div class="panel-header"><div><p class="eyebrow">GERENCIAMENTO</p><h2>Câmeras cadastradas</h2></div></div>
-          <div class="table-wrap"><table><thead><tr><th>Nome</th><th>Local</th><th>RTSP</th><th>Status</th><th></th></tr></thead><tbody id="cameraTableBody"></tbody></table></div>
-        </div>
+        <div class="panel"><div class="panel-header"><div><p class="eyebrow">GERENCIAMENTO</p><h2>Câmeras cadastradas</h2></div></div><div class="table-wrap"><table><thead><tr><th>Nome</th><th>Local</th><th>RTSP</th><th>Status</th><th></th></tr></thead><tbody id="cameraTableBody"></tbody></table></div></div>
       </section>
 
       <section id="timelineView" class="view">
         <div class="panel timeline-panel">
           <div class="panel-header timeline-header">
             <div><p class="eyebrow">VISÃO COMPUTACIONAL</p><h2>Timeline de pessoas</h2></div>
-            <div class="timeline-filters"><select id="timelineCamera"><option value="">Todas as câmeras</option></select><button class="button ghost small" id="timelineRefresh">↻ Atualizar</button></div>
+            <div class="timeline-filters"><select id="timelineCamera"><option value="">Todas as câmeras</option></select><button class="button ghost small" id="timelineRefresh">↻ Atualizar</button><button class="button danger small" id="timelineDeleteAll">Excluir todos</button></div>
           </div>
           <div id="timelineGrid" class="timeline-grid"><p class="muted">Carregando eventos…</p></div>
         </div>
@@ -76,18 +59,8 @@
 
       <section id="settingsView" class="view">
         <div class="settings-grid">
-          <article class="panel info-panel">
-            <p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2>
-            <div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div>
-            <div class="info-row"><span>Streaming</span><strong>go2rtc</strong></div>
-            <div class="info-row"><span>Visão</span><strong>OpenCV local</strong></div>
-            <div class="info-row"><span>PTZ</span><strong>ONVIF local</strong></div>
-          </article>
-          <article class="panel info-panel">
-            <p class="eyebrow">V2</p><h2>Detecção e tracking</h2>
-            <p class="muted paragraph">Detecção de pessoas e faces, IDs de tracking por câmera, snapshots de eventos e auto-follow PTZ opcional. O reconhecimento de identidade por embeddings continua reservado para a V3.</p>
-            <button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button>
-          </article>
+          <article class="panel info-panel"><p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2><div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div><div class="info-row"><span>Streaming</span><strong>go2rtc</strong></div><div class="info-row"><span>Visão</span><strong>YOLOX-Tiny ONNX</strong></div><div class="info-row"><span>PTZ</span><strong>DVRIP / ONVIF fallback</strong></div></article>
+          <article class="panel info-panel"><p class="eyebrow">V2</p><h2>Detecção e tracking</h2><p class="muted paragraph">Detecção de pessoas e faces, IDs de tracking por câmera, snapshots de eventos e auto-follow PTZ opcional. O reconhecimento de identidade por embeddings continua reservado para a V3.</p><button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button></article>
         </div>
       </section>
     </main>
@@ -127,7 +100,7 @@
   <dialog id="viewerDialog" class="viewer-modal">
     <div class="viewer-header">
       <div><p class="eyebrow">AO VIVO · V2</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div>
-      <div class="viewer-actions"><label class="follow-toggle"><input id="autoFollowToggle" type="checkbox" /><span>Acompanhar pessoa</span></label><button class="icon-button" type="button" data-viewer-close>×</button></div>
+      <div class="viewer-actions"><button class="button ghost small" id="setHomeBtn" type="button">⌂ Definir Home</button><button class="button ghost small" id="gotoHomeBtn" type="button" disabled>Ir para Home</button><label class="follow-toggle"><input id="autoFollowToggle" type="checkbox" /><span>Acompanhar pessoa</span></label><button class="icon-button" type="button" data-viewer-close>×</button></div>
     </div>
     <div class="viewer-frame-wrap" id="viewerStage">
       <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>
@@ -135,7 +108,7 @@
       <div id="visionStatus" class="vision-status">Visão: iniciando…</div>
       <div id="ptzJoystick" class="ptz-joystick" title="Arraste para mover a câmera"><div class="ptz-ring"><div id="ptzKnob" class="ptz-knob"></div></div></div>
     </div>
-    <div class="viewer-footer"><span id="trackHint" class="muted">Clique numa caixa de pessoa para selecioná-la para acompanhamento.</span><span id="ptzStatus" class="muted">PTZ: verificando…</span></div>
+    <div class="viewer-footer"><span id="trackHint" class="muted">Clique numa caixa de pessoa para selecioná-la para acompanhamento.</span><span class="viewer-footer-status"><span id="homeStatus" class="muted">Home não definido</span><span id="ptzStatus" class="muted">PTZ: verificando…</span></span></div>
   </dialog>
 
   <div id="toast" class="toast"></div>
