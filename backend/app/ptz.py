@@ -22,6 +22,7 @@ from .config import PTZ_ONVIF_PORT
 
 DVRIP_PORT = 34567
 DVRIP_OK = {100, 150, 515}
+HOME_PRESET = 0
 
 
 class PTZError(RuntimeError):
@@ -35,6 +36,18 @@ class PTZSession:
     password: str
     profile_token: str
     ptz_url: str
+
+
+@dataclass(slots=True)
+class _MotionState:
+    direction: str | None = None
+    consecutive: int = 0
+    last_at: float = 0.0
+    blocked_until: float = 0.0
+
+
+_motion_lock = threading.Lock()
+_motion_state: dict[str, _MotionState] = {}
 
 
 def _credentials(rtsp_url: str) -> tuple[str, str, str]:
@@ -51,14 +64,10 @@ def sofia_hash(password: str) -> str:
 
 
 def direction_from_vector(pan: float, tilt: float, deadzone: float = 0.18) -> str | None:
-    """Convert logical UI directions into native DVRIP direction names.
+    """Map logical joystick axes to native iCSee/XMEye DVRIP directions.
 
-    The tested cameras are horizontally mirrored relative to DVRIP's naming:
-    a physical/UI left command requires DirectionRight and vice versa.
-    Vertical directions are unchanged.
-
-    pan:  +right / -left
-    tilt: +up / -down
+    Physical testing showed horizontal movement is mirrored relative to the
+    DVRIP labels, therefore only left/right are intentionally swapped.
     """
     pan = float(pan)
     tilt = float(tilt)
@@ -78,6 +87,29 @@ def direction_from_vector(pan: float, tilt: float, deadzone: float = 0.18) -> st
     return mapping[(horizontal, vertical)]
 
 
+def _motion_allowed(host: str, direction: str, max_consecutive: int) -> bool:
+    now = time.monotonic()
+    with _motion_lock:
+        state = _motion_state.setdefault(host, _MotionState())
+        if now < state.blocked_until:
+            return False
+        if now - state.last_at > 2.0 or state.direction != direction:
+            state.direction = direction
+            state.consecutive = 0
+        state.consecutive += 1
+        state.last_at = now
+        if state.consecutive > max_consecutive:
+            state.blocked_until = now + 1.25
+            state.consecutive = 0
+            return False
+        return True
+
+
+def _reset_motion_guard(host: str) -> None:
+    with _motion_lock:
+        _motion_state.pop(host, None)
+
+
 def _recv_exact(sock: socket.socket, count: int) -> bytes:
     data = bytearray()
     while len(data) < count:
@@ -88,13 +120,7 @@ def _recv_exact(sock: socket.socket, count: int) -> bytes:
     return bytes(data)
 
 
-def _dvrip_request(
-    sock: socket.socket,
-    session: int,
-    sequence: int,
-    msg_id: int,
-    payload: dict,
-) -> tuple[dict, int]:
+def _dvrip_request(sock: socket.socket, session: int, sequence: int, msg_id: int, payload: dict) -> tuple[dict, int]:
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\x0a\x00"
     header = struct.pack("<BB2xII2xHI", 0xFF, 0, session, sequence, msg_id, len(raw))
     sock.sendall(header + raw)
@@ -115,16 +141,8 @@ def _dvrip_login(host: str, username: str, password: str, timeout: float = 2.5) 
     sock.settimeout(timeout)
     try:
         response, session = _dvrip_request(
-            sock,
-            0,
-            0,
-            1000,
-            {
-                "EncryptType": "MD5",
-                "LoginType": "DVRIP-Web",
-                "PassWord": sofia_hash(password),
-                "UserName": username,
-            },
+            sock, 0, 0, 1000,
+            {"EncryptType": "MD5", "LoginType": "DVRIP-Web", "PassWord": sofia_hash(password), "UserName": username},
         )
         ret = response.get("Ret")
         if ret not in DVRIP_OK:
@@ -156,17 +174,9 @@ def _dvrip_ptz_payload(command: str, step: int, preset: int) -> dict:
 
 
 def _dvrip_send_ptz(sock: socket.socket, session: int, sequence: int, command: str, step: int, preset: int = 65535) -> int:
-    payload = _dvrip_ptz_payload(command, step, preset)
     response, _ = _dvrip_request(
-        sock,
-        session,
-        sequence,
-        1400,
-        {
-            "Name": "OPPTZControl",
-            "SessionID": f"0x{session:08X}",
-            "OPPTZControl": payload,
-        },
+        sock, session, sequence, 1400,
+        {"Name": "OPPTZControl", "SessionID": f"0x{session:08X}", "OPPTZControl": _dvrip_ptz_payload(command, step, preset)},
     )
     ret = response.get("Ret")
     if ret not in DVRIP_OK:
@@ -183,18 +193,30 @@ def _dvrip_probe(rtsp_url: str) -> dict:
     return {"ok": True, "protocol": "dvrip", "port": DVRIP_PORT}
 
 
-def _dvrip_pulse(rtsp_url: str, pan: float, tilt: float, speed: float, duration: float) -> None:
+def _dvrip_pulse(
+    rtsp_url: str,
+    pan: float,
+    tilt: float,
+    speed: float,
+    duration: float,
+    *,
+    max_step: int = 12,
+    max_consecutive: int = 8,
+) -> None:
     command = direction_from_vector(pan, tilt)
     if command is None:
         return
     host, username, password = _credentials(rtsp_url)
     if not username:
         raise PTZError("DVRIP requer usuário da câmera")
+    if not _motion_allowed(host, command, max_consecutive):
+        return
     sock, session, sequence = _dvrip_login(host, username, password)
     try:
-        step = max(1, min(30, int(round(max(0.05, min(1.0, speed)) * 30))))
+        speed = max(0.05, min(1.0, float(speed)))
+        step = max(1, min(max_step, int(round(speed * max_step))))
         sequence = _dvrip_send_ptz(sock, session, sequence, command, step, 65535)
-        time.sleep(max(0.08, min(1.5, float(duration))))
+        time.sleep(max(0.08, min(0.45, float(duration))))
         _dvrip_send_ptz(sock, session, sequence, "DirectionUp", 5, -1)
     finally:
         sock.close()
@@ -209,9 +231,23 @@ def _dvrip_stop(rtsp_url: str) -> None:
         _dvrip_send_ptz(sock, session, sequence, "DirectionUp", 5, -1)
     finally:
         sock.close()
+    _reset_motion_guard(host)
+
+
+def _dvrip_preset(rtsp_url: str, command: str, preset: int = HOME_PRESET) -> None:
+    host, username, password = _credentials(rtsp_url)
+    if not username:
+        raise PTZError("DVRIP requer usuário da câmera")
+    sock, session, sequence = _dvrip_login(host, username, password)
+    try:
+        _dvrip_send_ptz(sock, session, sequence, command, 5, preset)
+    finally:
+        sock.close()
+    _reset_motion_guard(host)
 
 
 # --- ONVIF fallback for non-iCSee cameras ---------------------------------
+
 def _security_header(username: str, password: str) -> str:
     if not username:
         return ""
@@ -225,33 +261,20 @@ def _security_header(username: str, password: str) -> str:
         <wsse:UsernameToken>
           <wsse:Username>{escape(username)}</wsse:Username>
           <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{digest}</wsse:Password>
-          <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">{nonce64}</wsse:Nonce>
-          <wsu:Created>{created}</wsu:Created>
+          <wsse:Nonce>{nonce64}</wsse:Nonce><wsu:Created>{created}</wsu:Created>
         </wsse:UsernameToken>
       </wsse:Security>
     </s:Header>"""
 
 
 def _envelope(body: str, username: str, password: str) -> bytes:
-    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
- xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
- xmlns:trt="http://www.onvif.org/ver10/media/wsdl"
- xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"
- xmlns:tt="http://www.onvif.org/ver10/schema">
-{_security_header(username, password)}
-<s:Body>{body}</s:Body>
-</s:Envelope>"""
-    return xml.encode("utf-8")
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+{_security_header(username, password)}<s:Body>{body}</s:Body></s:Envelope>""".encode("utf-8")
 
 
 def _post(url: str, action: str, body: str, username: str, password: str, timeout: float = 3.5) -> str:
-    req = urllib.request.Request(
-        url,
-        data=_envelope(body, username, password),
-        method="POST",
-        headers={"Content-Type": f'application/soap+xml; charset=utf-8; action="{action}"'},
-    )
+    req = urllib.request.Request(url, data=_envelope(body, username, password), method="POST", headers={"Content-Type": f'application/soap+xml; charset=utf-8; action="{action}"'})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return response.read().decode("utf-8", "replace")
@@ -263,11 +286,7 @@ def _post(url: str, action: str, body: str, username: str, password: str, timeou
 
 
 def _extract_service(xml: str, service: str) -> str | None:
-    match = re.search(
-        rf"<(?:\w+:)?{service}\b[^>]*>.*?<(?:\w+:)?XAddr>(.*?)</(?:\w+:)?XAddr>",
-        xml,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
+    match = re.search(rf"<(?:\w+:)?{service}\b[^>]*>.*?<(?:\w+:)?XAddr>(.*?)</(?:\w+:)?XAddr>", xml, flags=re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else None
 
 
@@ -280,13 +299,7 @@ def _extract_profile_token(xml: str) -> str | None:
 def session_for(rtsp_url: str) -> PTZSession:
     host, username, password = _credentials(rtsp_url)
     device_url = f"http://{host}:{PTZ_ONVIF_PORT}/onvif/device_service"
-    caps = _post(
-        device_url,
-        "http://www.onvif.org/ver10/device/wsdl/GetCapabilities",
-        '<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>',
-        username,
-        password,
-    )
+    caps = _post(device_url, "http://www.onvif.org/ver10/device/wsdl/GetCapabilities", '<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>', username, password)
     media_url = _extract_service(caps, "Media") or f"http://{host}:{PTZ_ONVIF_PORT}/onvif/media_service"
     ptz_url = _extract_service(caps, "PTZ") or f"http://{host}:{PTZ_ONVIF_PORT}/onvif/ptz_service"
     profiles = _post(media_url, "http://www.onvif.org/ver10/media/wsdl/GetProfiles", "<trt:GetProfiles/>", username, password)
@@ -298,27 +311,29 @@ def session_for(rtsp_url: str) -> PTZSession:
 
 def _onvif_move(rtsp_url: str, pan: float, tilt: float, speed: float, duration: float) -> None:
     session = session_for(rtsp_url)
-    speed = max(0.05, min(1.0, float(speed)))
+    speed = max(0.05, min(0.55, float(speed)))
     pan = max(-1.0, min(1.0, float(pan))) * speed
     tilt = max(-1.0, min(1.0, float(tilt))) * speed
-    body = f"""
-<tptz:ContinuousMove>
-  <tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken>
-  <tptz:Velocity><tt:PanTilt x="{pan:.4f}" y="{tilt:.4f}"/></tptz:Velocity>
-  <tptz:Timeout>PT{max(0.1, min(2.0, duration)):.2f}S</tptz:Timeout>
-</tptz:ContinuousMove>"""
+    body = f"<tptz:ContinuousMove><tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x=\"{pan:.4f}\" y=\"{tilt:.4f}\"/></tptz:Velocity><tptz:Timeout>PT{max(0.1, min(0.45, duration)):.2f}S</tptz:Timeout></tptz:ContinuousMove>"
     _post(session.ptz_url, "http://www.onvif.org/ver20/ptz/wsdl/ContinuousMove", body, session.username, session.password)
 
 
 def _onvif_stop(rtsp_url: str) -> None:
     session = session_for(rtsp_url)
-    body = f"""
-<tptz:Stop>
-  <tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken>
-  <tptz:PanTilt>true</tptz:PanTilt>
-  <tptz:Zoom>false</tptz:Zoom>
-</tptz:Stop>"""
+    body = f"<tptz:Stop><tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>false</tptz:Zoom></tptz:Stop>"
     _post(session.ptz_url, "http://www.onvif.org/ver20/ptz/wsdl/Stop", body, session.username, session.password)
+
+
+def _onvif_preset(rtsp_url: str, command: str, preset: int = HOME_PRESET) -> None:
+    session = session_for(rtsp_url)
+    token = str(preset)
+    if command == "SetPreset":
+        body = f"<tptz:SetPreset><tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken><tptz:PresetToken>{token}</tptz:PresetToken></tptz:SetPreset>"
+        action = "http://www.onvif.org/ver20/ptz/wsdl/SetPreset"
+    else:
+        body = f"<tptz:GotoPreset><tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken><tptz:PresetToken>{token}</tptz:PresetToken></tptz:GotoPreset>"
+        action = "http://www.onvif.org/ver20/ptz/wsdl/GotoPreset"
+    _post(session.ptz_url, action, body, session.username, session.password)
 
 
 def probe(rtsp_url: str) -> dict:
@@ -335,13 +350,18 @@ def probe(rtsp_url: str) -> dict:
 
 
 def move(rtsp_url: str, pan: float, tilt: float, speed: float = 0.55, duration: float = 0.35) -> None:
-    """Issue one PTZ pulse. iCSee/XMEye DVRIP is preferred over ONVIF."""
+    pulse(rtsp_url, pan, tilt, speed=speed, duration=duration)
+
+
+def pulse(rtsp_url: str, pan: float, tilt: float, speed: float = 0.55, duration: float = 0.28, *, max_step: int = 12, max_consecutive: int = 8) -> None:
     try:
-        _dvrip_pulse(rtsp_url, pan, tilt, speed, duration)
+        _dvrip_pulse(rtsp_url, pan, tilt, speed, duration, max_step=max_step, max_consecutive=max_consecutive)
         return
     except Exception as dvrip_exc:
         try:
-            _onvif_move(rtsp_url, pan, tilt, speed, duration)
+            _onvif_move(rtsp_url, pan, tilt, min(speed, 0.55), min(duration, 0.35))
+            time.sleep(max(0.08, min(0.35, float(duration))))
+            _onvif_stop(rtsp_url)
         except Exception as onvif_exc:
             raise PTZError(f"DVRIP falhou: {dvrip_exc}; ONVIF falhou: {onvif_exc}") from onvif_exc
 
@@ -354,12 +374,23 @@ def stop(rtsp_url: str) -> None:
         _onvif_stop(rtsp_url)
 
 
-def pulse(rtsp_url: str, pan: float, tilt: float, speed: float = 0.55, duration: float = 0.28) -> None:
-    move(rtsp_url, pan, tilt, speed, duration)
-
-
-def _safe_stop(rtsp_url: str) -> None:
+def set_home(rtsp_url: str) -> None:
     try:
-        stop(rtsp_url)
-    except Exception:
-        pass
+        _dvrip_preset(rtsp_url, "SetPreset", HOME_PRESET)
+        return
+    except Exception as dvrip_exc:
+        try:
+            _onvif_preset(rtsp_url, "SetPreset", HOME_PRESET)
+        except Exception as onvif_exc:
+            raise PTZError(f"Não foi possível definir Home. DVRIP: {dvrip_exc}; ONVIF: {onvif_exc}") from onvif_exc
+
+
+def goto_home(rtsp_url: str) -> None:
+    try:
+        _dvrip_preset(rtsp_url, "GotoPreset", HOME_PRESET)
+        return
+    except Exception as dvrip_exc:
+        try:
+            _onvif_preset(rtsp_url, "GotoPreset", HOME_PRESET)
+        except Exception as onvif_exc:
+            raise PTZError(f"Não foi possível retornar ao Home. DVRIP: {dvrip_exc}; ONVIF: {onvif_exc}") from onvif_exc
