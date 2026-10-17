@@ -110,8 +110,9 @@ function renderVisionOverlay(vision) {
     const b = track.bbox;
     const selected = Number(track.track_id) === Number(state.viewer.selectedTrackId);
     const stable = track.control_valid !== false;
-    const cls = `${selected ? 'selected' : ''} ${track.has_face ? 'face' : ''} ${stable ? '' : 'unstable'}`;
-    const suffix = stable ? '' : ' · aguardando';
+    const cls = `${selected ? 'selected' : ''} ${track.has_face ? 'face' : ''} ${stable ? '' : 'unstable'} ${track.face_search ? 'face-search' : ''}`;
+    let suffix = stable ? '' : ' · aguardando';
+    if (track.face_search) suffix += ' · procurando rosto';
     return `<button class="track-box ${cls}" title="${escapeHtml(track.control_reason || '')}" data-track-id="${track.track_id}" style="left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%"><span>#${track.track_id}${track.has_face ? ' · face' : ''}${suffix}</span></button>`;
   }).join('');
   $$('[data-track-id]').forEach(el => el.addEventListener('click', async (event) => {
@@ -139,7 +140,8 @@ async function pollVision() {
     renderVisionOverlay(vision);
     const count = (vision.tracks || []).length;
     const status = vision.status === 'running' ? `${count} pessoa(s)` : vision.status;
-    $('#visionStatus').textContent = `Visão: ${status}${vision.error ? ` · ${vision.error}` : ''}`;
+    const latency = vision.capture_latency_ms != null && vision.status === 'running' ? ` · fila ${Math.round(vision.capture_latency_ms)} ms` : '';
+    $('#visionStatus').textContent = `Visão: ${status}${latency}${vision.error ? ` · ${vision.error}` : ''}`;
     $('#autoFollowToggle').checked = Boolean(vision.auto_follow_enabled);
     if (vision.selected_track_id && !state.viewer.selectedTrackId) state.viewer.selectedTrackId = vision.selected_track_id;
     $('#homeStatus').textContent = vision.home_preset_set ? 'Home definido' : 'Home não definido';
@@ -187,6 +189,67 @@ async function saveFollowMaxSpeed() {
     toast(`Velocidade do auto-follow: ${error.message}`, 'error');
     await pollVision();
   }
+}
+
+function viewerMediaUrl(camera, speakerOn, micOn) {
+  const media = ['video'];
+  if (speakerOn) media.push('audio');
+  if (micOn) media.push('microphone');
+  return `${go2rtcBase()}/webrtc.html?src=${encodeURIComponent(camera.stream_name)}&media=${encodeURIComponent(media.join('+'))}`;
+}
+
+function updateAudioControls() {
+  const listen = $('#listenAudioBtn');
+  const talk = $('#talkMicBtn');
+  listen.setAttribute('aria-pressed', String(state.viewer.speakerOn));
+  talk.setAttribute('aria-pressed', String(state.viewer.micOn));
+  listen.classList.toggle('active', state.viewer.speakerOn);
+  talk.classList.toggle('active', state.viewer.micOn);
+  listen.textContent = state.viewer.speakerOn ? '🔊 Áudio' : '🔇 Áudio';
+  talk.textContent = state.viewer.micOn ? '🎤 Falando' : '🎙 Microfone';
+  const status = state.viewer.micOn
+    ? (state.viewer.speakerOn ? 'Áudio ativo · microfone transmitindo' : 'Microfone transmitindo · áudio local mutado')
+    : (state.viewer.speakerOn ? 'Áudio da câmera ativo · microfone mutado' : 'Áudio e microfone mutados');
+  $('#audioStatus').textContent = status;
+}
+
+function reloadViewerMedia() {
+  const camera = state.cameras.find(c => c.id === state.viewer.cameraId);
+  if (!camera) return;
+  $('#viewerFrame').src = viewerMediaUrl(camera, state.viewer.speakerOn, state.viewer.micOn);
+  updateAudioControls();
+}
+
+async function checkAudio(cameraId) {
+  state.viewer.talkbackConfigured = false;
+  try {
+    const result = await api(`/api/cameras/${cameraId}/audio/status`);
+    state.viewer.talkbackConfigured = Boolean(result.talkback_configured);
+    $('#talkMicBtn').disabled = !result.talkback_configured;
+    $('#listenAudioBtn').disabled = !result.ok;
+    if (!result.talkback_configured) $('#talkMicBtn').title = 'Backchannel não detectado/configurado para esta câmera';
+  } catch (_) {
+    $('#talkMicBtn').disabled = false;
+  }
+}
+
+function toggleCameraAudio() {
+  state.viewer.speakerOn = !state.viewer.speakerOn;
+  reloadViewerMedia();
+}
+
+function toggleCameraMicrophone() {
+  if (!state.viewer.micOn && !window.isSecureContext) {
+    toast('O navegador só libera microfone em HTTPS ou localhost. Para acesso remoto, use HTTPS no Tailscale.', 'error');
+    return;
+  }
+  if (!state.viewer.micOn && state.viewer.talkbackConfigured === false) {
+    toast('Esta câmera ainda não anunciou/configurou backchannel de áudio.', 'error');
+    return;
+  }
+  state.viewer.micOn = !state.viewer.micOn;
+  reloadViewerMedia();
+  if (state.viewer.micOn) toast('Autorize o microfone no navegador se ele solicitar permissão.');
 }
 
 async function checkPTZ(cameraId) {
@@ -238,9 +301,17 @@ function openViewer(id) {
   if (!camera.enabled || camera.sync_status !== 'ok') { toast(camera.sync_error || 'Esta câmera não está disponível.', 'error'); return; }
   state.viewer.cameraId = id;
   state.viewer.selectedTrackId = null;
+  state.viewer.speakerOn = false;
+  state.viewer.micOn = false;
+  state.viewer.talkbackConfigured = null;
   $('#viewerTitle').textContent = camera.name;
   $('#viewerLocation').textContent = camera.location || '';
-  $('#viewerFrame').src = resolveViewerUrl(camera.viewer_url);
+  // Explicit video-only WebRTC keeps both speaker and browser microphone muted
+  // by default. Audio tracks are negotiated only after a user click.
+  $('#viewerFrame').src = viewerMediaUrl(camera, false, false);
+  updateAudioControls();
+  $('#listenAudioBtn').disabled = false;
+  $('#talkMicBtn').disabled = false;
   $('#visionOverlay').innerHTML = '';
   $('#visionStatus').textContent = 'Visão: iniciando…';
   $('#autoFollowToggle').checked = false;
@@ -248,8 +319,9 @@ function openViewer(id) {
   $('#viewerDialog').showModal();
   pollVision();
   clearInterval(state.viewer.pollTimer);
-  state.viewer.pollTimer = setInterval(pollVision, 700);
+  state.viewer.pollTimer = setInterval(pollVision, 500);
   checkPTZ(id);
+  setTimeout(() => checkAudio(id), 400);
 }
 
 async function closeViewer() {
@@ -258,6 +330,9 @@ async function closeViewer() {
   if (state.viewer.cameraId) {
     try { await api(`/api/cameras/${state.viewer.cameraId}/ptz/stop`, { method: 'POST', body: '{}' }); } catch (_) {}
   }
+  state.viewer.speakerOn = false;
+  state.viewer.micOn = false;
+  updateAudioControls();
   $('#viewerFrame').src = 'about:blank';
   $('#visionOverlay').innerHTML = '';
   state.viewer.cameraId = null;
@@ -283,10 +358,10 @@ async function sendJoystick(event) {
   const v = joystickVector(event);
   $('#ptzKnob').style.transform = `translate(${v.visualX * 30}px, ${v.visualY * 30}px)`;
   const now = performance.now();
-  if (now - joystickLastSend < 180 || v.mag < 0.15) return;
+  if (now - joystickLastSend < 150 || v.mag < 0.15) return;
   joystickLastSend = now;
   try {
-    await api(`/api/cameras/${state.viewer.cameraId}/ptz/move`, { method: 'POST', body: JSON.stringify({ pan: v.pan, tilt: v.tilt, speed: Math.max(.22, v.mag * .58), duration: .24 }) });
+    await api(`/api/cameras/${state.viewer.cameraId}/ptz/move`, { method: 'POST', body: JSON.stringify({ pan: v.pan, tilt: v.tilt, speed: Math.max(.22, v.mag * .58), duration: .20 }) });
   } catch (error) { $('#ptzStatus').textContent = `PTZ: ${error.message}`; }
 }
 
@@ -304,11 +379,16 @@ $('#addCameraBtn').addEventListener('click', () => openCameraDialog());
 $('#discoverBtn').addEventListener('click', openDiscovery);
 $('#emptyDiscoverBtn').addEventListener('click', openDiscovery);
 $('#emptyAddBtn').addEventListener('click', () => openCameraDialog());
-$('#refreshBtn').addEventListener('click', () => Promise.all([loadCameras(), loadHealth(), loadEvents()]));
+$('#refreshBtn').addEventListener('click', () => Promise.all([loadCameras(), loadHealth(), loadEvents(), loadPersons()]));
 $('#syncAllBtn').addEventListener('click', syncAll);
 $('#timelineRefresh').addEventListener('click', loadEvents);
 $('#timelineDeleteAll').addEventListener('click', deleteAllTimelineEvents);
+$('#timelineDeleteSelected').addEventListener('click', deleteSelectedTimelineEvents);
+$('#timelineSelectAll').addEventListener('click', toggleSelectAllTimelineEvents);
+$('#timelineClearFilters').addEventListener('click', clearTimelineFilters);
 $('#timelineCamera').addEventListener('change', loadEvents);
+$('#timelinePerson').addEventListener('change', loadEvents);
+$('#timelineFace').addEventListener('change', loadEvents);
 $('#cameraForm').addEventListener('submit', saveCamera);
 $('#backToDiscoveryBtn').addEventListener('click', backToDiscovery);
 $('#testDiscoveryBtn').addEventListener('click', testDiscoveredAccess);
@@ -321,6 +401,8 @@ $$('[data-close]').forEach(el => el.addEventListener('click', () => $('#cameraDi
 $('[data-viewer-close]').addEventListener('click', closeViewer);
 $('#viewerDialog').addEventListener('cancel', (event) => { event.preventDefault(); closeViewer(); });
 $('#autoFollowToggle').addEventListener('change', (event) => setAutoFollow(event.target.checked));
+$('#listenAudioBtn').addEventListener('click', toggleCameraAudio);
+$('#talkMicBtn').addEventListener('click', toggleCameraMicrophone);
 $('#setHomeBtn').addEventListener('click', setHomePosition);
 $('#gotoHomeBtn').addEventListener('click', gotoHomePosition);
 $('#followMaxSpeed').addEventListener('input', (event) => { $('#followMaxSpeedValue').textContent = `${event.target.value}%`; });
@@ -339,5 +421,5 @@ $('#ptzJoystick').addEventListener('pointercancel', endJoystick);
 
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(console.warn));
 
-Promise.all([loadCameras(), loadHealth(), loadEvents()]);
+Promise.all([loadCameras(), loadHealth(), loadEvents(), loadPersons()]);
 setInterval(loadHealth, 30000);
