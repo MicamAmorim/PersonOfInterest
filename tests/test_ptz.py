@@ -1,20 +1,27 @@
 import unittest
 
-from backend.app.ptz import logical_to_onvif
+from backend.app.ptz import direction_from_vector, sofia_hash
 
 
-class PTZMappingTests(unittest.TestCase):
-    def test_icsee_axis_rotation_and_inversion(self):
-        self.assertEqual(logical_to_onvif(1, 0), (0.0, -1.0))     # right
-        self.assertEqual(logical_to_onvif(-1, 0), (0.0, 1.0))     # left
-        self.assertEqual(logical_to_onvif(0, 1), (1.0, 0.0))      # up
-        self.assertEqual(logical_to_onvif(0, -1), (-1.0, 0.0))    # down
+class PTZDirectionTests(unittest.TestCase):
+    def test_cardinal_directions(self):
+        self.assertEqual(direction_from_vector(1, 0), "DirectionRight")
+        self.assertEqual(direction_from_vector(-1, 0), "DirectionLeft")
+        self.assertEqual(direction_from_vector(0, 1), "DirectionUp")
+        self.assertEqual(direction_from_vector(0, -1), "DirectionDown")
 
-    def test_southeast_maps_opposite_previous_command(self):
-        self.assertEqual(logical_to_onvif(1, -1), (-1.0, -1.0))
+    def test_diagonal_directions(self):
+        self.assertEqual(direction_from_vector(1, 1), "DirectionRightUp")
+        self.assertEqual(direction_from_vector(1, -1), "DirectionRightDown")
+        self.assertEqual(direction_from_vector(-1, 1), "DirectionLeftUp")
+        self.assertEqual(direction_from_vector(-1, -1), "DirectionLeftDown")
 
-    def test_mapping_clamps_input(self):
-        self.assertEqual(logical_to_onvif(3, -4), (-1.0, -1.0))
+    def test_deadzone(self):
+        self.assertIsNone(direction_from_vector(0.05, -0.05))
+
+    def test_sofia_hash_is_stable(self):
+        self.assertEqual(len(sofia_hash("")), 8)
+        self.assertEqual(sofia_hash(""), "tlJwpbo6")
 
 
 if __name__ == "__main__":
