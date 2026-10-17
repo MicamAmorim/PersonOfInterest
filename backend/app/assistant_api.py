@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .assistant import manager as assistant_manager
+from .wake_word import manager as wake_word_manager
 
 
 router = APIRouter()
@@ -17,28 +18,33 @@ class AssistantSettingsUpdate(BaseModel):
     interval_minutes: int = Field(default=30, ge=1, le=1440)
     voice_gender: Literal["female", "male"] = "female"
     timezone: str = Field(default="UTC", min_length=1, max_length=80)
+    wake_enabled: bool = False
 
 
 @router.get("/api/assistant/status")
 def assistant_status() -> dict:
-    return assistant_manager.state()
+    state = assistant_manager.state()
+    state["wake_word"] = wake_word_manager.state()
+    return state
 
 
 @router.get("/api/assistant/settings")
 def assistant_settings() -> list[dict]:
-    return assistant_manager.list_settings()
+    return wake_word_manager.enrich_settings(assistant_manager.list_settings())
 
 
 @router.patch("/api/assistant/cameras/{camera_id}")
 def update_assistant_camera(camera_id: int, payload: AssistantSettingsUpdate) -> dict:
     try:
-        return assistant_manager.update_settings(
+        saved = assistant_manager.update_settings(
             camera_id,
             enabled=payload.enabled,
             interval_minutes=payload.interval_minutes,
             voice_gender=payload.voice_gender,
             timezone_name=payload.timezone,
         )
+        wake_word_manager.update_setting(camera_id, payload.wake_enabled)
+        return wake_word_manager.enrich_settings([saved])[0]
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
