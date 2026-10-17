@@ -1,11 +1,15 @@
 {
+  "id": "/",
   "name": "PersonOfInterest",
   "short_name": "POI",
-  "description": "Local-first IP camera dashboard for PersonOfInterest.",
+  "description": "NVR local com visão computacional, identidade e alertas.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#090b10",
   "theme_color": "#11151d",
+  "categories": ["utilities", "security"],
   "icons": [
     {
       "src": "/icon.svg",
@@ -13,5 +17,10 @@
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    {"name": "Timeline", "url": "/?view=timeline"},
+    {"name": "Pessoas", "url": "/?view=identity"},
+    {"name": "Alertas", "url": "/?view=alerts"}
   ]
 }
