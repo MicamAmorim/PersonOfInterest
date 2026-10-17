@@ -27,7 +27,7 @@ if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
 }
 
-Write-Host "Verificando dependencias da V4.2..." -ForegroundColor DarkGray
+Write-Host "Verificando dependencias da V4.3..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
@@ -41,13 +41,13 @@ if ($depsExitCode -ne 0) {
     Write-Host "Ajustando dependencias de visao, identidade, assistente, fusos horarios e Web Push..." -ForegroundColor Yellow
     & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao instalar as dependencias da V4.2."
+        throw "Falha ao instalar as dependencias da V4.3."
     }
 }
 
 & $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography,edge_tts; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Edge TTS OK | Timezone DB OK | Web Push OK')"
 if ($LASTEXITCODE -ne 0) {
-    throw "Dependencias da V4.2 nao estao compativeis."
+    throw "Dependencias da V4.3 nao estao compativeis."
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
@@ -97,7 +97,7 @@ log:
 '@
 [System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
 
-Write-Host "=== PersonOfInterest V4.2 ===" -ForegroundColor Cyan
+Write-Host "=== PersonOfInterest V4.3 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
@@ -142,7 +142,7 @@ try {
         throw "O backend nao respondeu na porta 8080."
     }
 
-    Write-Host "PersonOfInterest V4.2 online: http://localhost:8080" -ForegroundColor Green
+    Write-Host "PersonOfInterest V4.3 online: http://localhost:8080" -ForegroundColor Green
     Write-Host "Para acesso seguro no celular: .\tailscale-serve.ps1" -ForegroundColor DarkGray
     Write-Host "Pressione Ctrl+C para encerrar." -ForegroundColor DarkGray
     if (-not $NoBrowser) {
