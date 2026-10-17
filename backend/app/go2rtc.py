@@ -15,6 +15,8 @@ from .config import GO2RTC_API_URL
 class Go2RTCResult:
     ok: bool
     error: str | None = None
+    effective_url: str | None = None
+    warning: str | None = None
 
 
 QueryValue = str | Sequence[str]
@@ -73,6 +75,29 @@ def local_restream_url(stream_name: str) -> str:
     return f"rtsp://127.0.0.1:8554/{urllib.parse.quote(stream_name, safe='')}"
 
 
+def _anonymous_rtsp_url(rtsp_url: str) -> str | None:
+    """Return the same RTSP endpoint without userinfo.
+
+    Some inexpensive iCSee/XMEye firmwares expose RTSP anonymously even though
+    the mobile app/PTZ interface uses credentials. Supplying userinfo to such a
+    firmware can paradoxically be rejected as wrong user/pass. Keep credentials
+    in SQLite for PTZ/DVRIP, but allow the video transport itself to be anonymous.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(rtsp_url)
+        if parsed.scheme.lower() != "rtsp" or not parsed.hostname:
+            return None
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+    except Exception:
+        return None
+
+
 def dvrip_backchannel_url(rtsp_url: str) -> str | None:
     """Build an iCSee/XMEye DVRIP audio backchannel source when credentials exist.
 
@@ -92,15 +117,7 @@ def dvrip_backchannel_url(rtsp_url: str) -> str | None:
         return None
 
 
-def _validate_primary_rtsp(rtsp_url: str) -> Go2RTCResult:
-    """Authenticate against the exact configured RTSP endpoint before go2rtc.
-
-    go2rtc accepts stream definitions lazily, so PUT /api/streams succeeding does
-    not prove that the camera accepted credentials. Without a preflight, a bad
-    password causes both go2rtc and the CV restream consumer to retry every
-    second. Validate once here and keep an invalid camera in sync_status=error
-    until the user edits/resyncs it.
-    """
+def _probe_exact_rtsp(rtsp_url: str) -> Go2RTCResult:
     try:
         parsed = urllib.parse.urlsplit(rtsp_url)
         if parsed.scheme.lower() != "rtsp" or not parsed.hostname:
@@ -119,7 +136,7 @@ def _validate_primary_rtsp(rtsp_url: str) -> Go2RTCResult:
             paths=(path,),
         )
         if result.ok:
-            return Go2RTCResult(True)
+            return Go2RTCResult(True, effective_url=rtsp_url)
         if result.status_code == 401:
             return Go2RTCResult(False, "RTSP: usuário ou senha recusados pela câmera")
         return Go2RTCResult(False, f"RTSP: {result.error or 'não foi possível abrir o stream'}")
@@ -127,49 +144,70 @@ def _validate_primary_rtsp(rtsp_url: str) -> Go2RTCResult:
         return Go2RTCResult(False, f"RTSP: falha ao validar o stream ({exc})")
 
 
+def _validate_primary_rtsp(rtsp_url: str) -> Go2RTCResult:
+    """Validate configured RTSP and transparently try anonymous video fallback."""
+    configured = _probe_exact_rtsp(rtsp_url)
+    if configured.ok:
+        return configured
+
+    try:
+        parsed = urllib.parse.urlsplit(rtsp_url)
+        has_userinfo = parsed.username is not None or parsed.password is not None
+    except Exception:
+        has_userinfo = False
+
+    if has_userinfo:
+        anonymous_url = _anonymous_rtsp_url(rtsp_url)
+        if anonymous_url and anonymous_url != rtsp_url:
+            anonymous = _probe_exact_rtsp(anonymous_url)
+            if anonymous.ok:
+                return Go2RTCResult(
+                    True,
+                    effective_url=anonymous_url,
+                    warning="RTSP de vídeo aceito sem autenticação; credenciais cadastradas foram mantidas para PTZ/talkback.",
+                )
+
+    return configured
+
+
 def upsert_stream(
     stream_name: str,
     rtsp_url: str,
     extra_sources: Sequence[str] | None = None,
 ) -> Go2RTCResult:
-    # Backward compatibility: older callers still pass the DVRIP backchannel as
-    # an extra source for the primary stream. Ignore extras there so an optional
-    # talkback authentication failure can never poison normal video/vision.
-    # Dedicated *_talkback streams are the only streams allowed to use extras.
+    # Dedicated *_talkback streams are the only streams allowed to use extra
+    # DVRIP sources. An optional talkback failure must never poison video.
     is_talkback = stream_name.endswith("_talkback")
+    effective_url = rtsp_url
+    warning: str | None = None
     if not is_talkback:
         validation = _validate_primary_rtsp(rtsp_url)
         if not validation.ok:
-            # Remove any previously configured runtime stream so viewers/CV do
-            # not keep reconnecting to a known-bad source.
             _drop_stream_quietly(stream_name)
             _drop_stream_quietly(talkback_stream_name(stream_name))
             return validation
+        effective_url = validation.effective_url or rtsp_url
+        warning = validation.warning
 
-    sources = [rtsp_url]
+    sources = [effective_url]
     if is_talkback:
         for source in extra_sources or ():
             if source and source not in sources:
                 sources.append(source)
     try:
         _request("PUT", "/api/streams", {"name": stream_name, "src": sources})
-        return Go2RTCResult(ok=True)
+        return Go2RTCResult(ok=True, effective_url=effective_url, warning=warning)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip() or str(exc)
         if _stream_exists(stream_name):
-            return Go2RTCResult(ok=True)
+            return Go2RTCResult(ok=True, effective_url=effective_url, warning=warning)
         return Go2RTCResult(ok=False, error=detail)
     except Exception as exc:
         return Go2RTCResult(ok=False, error=str(exc))
 
 
 def configure_talkback_stream(stream_name: str, rtsp_url: str) -> Go2RTCResult:
-    """Create/update a lazy stream used only while the user is talking.
-
-    Normal video comes from the primary RTSP stream. The talkback stream reuses
-    that local restream for receive media and adds a DVRIP source solely for the
-    microphone -> camera-speaker direction.
-    """
+    """Create/update a lazy stream used only while the user is talking."""
     backchannel = dvrip_backchannel_url(rtsp_url)
     if not backchannel:
         return Go2RTCResult(ok=False, error="DVRIP backchannel sem credenciais")
@@ -181,8 +219,6 @@ def configure_talkback_stream(stream_name: str, rtsp_url: str) -> Go2RTCResult:
 
 
 def delete_stream(stream_name: str) -> Go2RTCResult:
-    # A camera's auxiliary talkback stream must not survive deletion/disable of
-    # the primary stream.
     if not stream_name.endswith("_talkback"):
         _drop_stream_quietly(talkback_stream_name(stream_name))
     try:
