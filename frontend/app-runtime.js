@@ -192,10 +192,17 @@ async function saveFollowMaxSpeed() {
 }
 
 function viewerMediaUrl(camera, speakerOn, micOn) {
-  const media = ['video'];
-  if (speakerOn) media.push('audio');
-  if (micOn) media.push('microphone');
-  return `${go2rtcBase()}/webrtc.html?src=${encodeURIComponent(camera.stream_name)}&media=${encodeURIComponent(media.join('+'))}`;
+  // Preserve go2rtc's stream.html fallback (WebRTC/MSE/MP4/MJPEG) while both
+  // audio directions are off. Switch to our WebRTC player only on explicit user
+  // activation so camera audio is guaranteed muted by default.
+  if (!speakerOn && !micOn) return resolveViewerUrl(camera.viewer_url);
+  const params = new URLSearchParams({
+    src: camera.stream_name,
+    listen: speakerOn ? '1' : '0',
+    microphone: micOn ? '1' : '0',
+    rtc_port: '1984',
+  });
+  return `/camera-webrtc.html?${params.toString()}`;
 }
 
 function updateAudioControls() {
@@ -240,7 +247,7 @@ function toggleCameraAudio() {
 
 function toggleCameraMicrophone() {
   if (!state.viewer.micOn && !window.isSecureContext) {
-    toast('O navegador só libera microfone em HTTPS ou localhost. Para acesso remoto, use HTTPS no Tailscale.', 'error');
+    toast('O navegador só libera microfone em HTTPS ou localhost. Para acesso remoto, use HTTPS.', 'error');
     return;
   }
   if (!state.viewer.micOn && state.viewer.talkbackConfigured === false) {
@@ -251,6 +258,15 @@ function toggleCameraMicrophone() {
   reloadViewerMedia();
   if (state.viewer.micOn) toast('Autorize o microfone no navegador se ele solicitar permissão.');
 }
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== location.origin || event.data?.source !== 'personofinterest-camera-webrtc') return;
+  const type = event.data.type || '';
+  if (['webrtc-error', 'signal-error', 'connection-error', 'autoplay-blocked'].includes(type)) {
+    $('#audioStatus').textContent = event.data.message || 'Falha no áudio WebRTC';
+    if (type !== 'autoplay-blocked') toast(event.data.message || 'Falha no áudio WebRTC', 'error');
+  }
+});
 
 async function checkPTZ(cameraId) {
   state.viewer.ptzReady = false;
@@ -306,8 +322,6 @@ function openViewer(id) {
   state.viewer.talkbackConfigured = null;
   $('#viewerTitle').textContent = camera.name;
   $('#viewerLocation').textContent = camera.location || '';
-  // Explicit video-only WebRTC keeps both speaker and browser microphone muted
-  // by default. Audio tracks are negotiated only after a user click.
   $('#viewerFrame').src = viewerMediaUrl(camera, false, false);
   updateAudioControls();
   $('#listenAudioBtn').disabled = false;
