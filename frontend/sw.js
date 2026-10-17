@@ -1,5 +1,5 @@
-const CACHE = 'personofinterest-v1.1';
-const SHELL = ['/', '/styles.css', '/app-core.js', '/app-runtime.js', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'personofinterest-v2';
+const SHELL = ['/', '/styles.css', '/v2.css', '/app-core.js', '/app-runtime.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
