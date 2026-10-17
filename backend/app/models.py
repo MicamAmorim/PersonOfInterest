@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CameraCreate(BaseModel):
@@ -134,3 +134,89 @@ class PersonCreate(BaseModel):
 
 class EventPersonAssignRequest(BaseModel):
     person_id: int | None = Field(default=None, ge=1)
+
+
+class IdentityAssignRequest(BaseModel):
+    person_id: int | None = Field(default=None, ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def strip_identity_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def one_identity_target(self) -> "IdentityAssignRequest":
+        if self.person_id is None and not self.name:
+            raise ValueError("Informe uma pessoa existente ou um nome")
+        return self
+
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str = Field(min_length=8, max_length=4096)
+    p256dh: str = Field(min_length=8, max_length=1024)
+    auth: str = Field(min_length=4, max_length=512)
+    expiration_time: float | None = None
+    user_agent: str | None = Field(default=None, max_length=512)
+
+
+class AlertRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    camera_id: int | None = Field(default=None, ge=1)
+    person_id: int | None = Field(default=None, ge=1)
+    unknown_only: bool = False
+    start_time: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end_time: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    weekdays: list[int] = Field(default_factory=lambda: list(range(7)), min_length=1, max_length=7)
+    timezone: str = Field(default="UTC", min_length=1, max_length=80)
+    cooldown_seconds: int = Field(default=300, ge=0, le=86400)
+
+    @field_validator("name", "timezone")
+    @classmethod
+    def strip_rule_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, value: list[int]) -> list[int]:
+        cleaned = sorted(set(int(day) for day in value))
+        if not cleaned or any(day < 0 or day > 6 for day in cleaned):
+            raise ValueError("Dias da semana devem estar entre 0 e 6")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_rule_scope(self) -> "AlertRuleCreate":
+        if self.unknown_only and self.person_id is not None:
+            raise ValueError("Uma regra não pode ser de desconhecidos e de uma pessoa específica ao mesmo tempo")
+        if bool(self.start_time) != bool(self.end_time):
+            raise ValueError("Informe horário inicial e final juntos")
+        return self
+
+
+class AlertRuleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    camera_id: int | None = Field(default=None, ge=1)
+    person_id: int | None = Field(default=None, ge=1)
+    unknown_only: bool | None = None
+    start_time: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end_time: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
+    timezone: str | None = Field(default=None, min_length=1, max_length=80)
+    cooldown_seconds: int | None = Field(default=None, ge=0, le=86400)
+
+    @field_validator("name", "timezone")
+    @classmethod
+    def strip_optional_rule_text(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_optional_weekdays(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        cleaned = sorted(set(int(day) for day in value))
+        if not cleaned or any(day < 0 or day > 6 for day in cleaned):
+            raise ValueError("Dias da semana devem estar entre 0 e 6")
+        return cleaned

@@ -10,15 +10,14 @@
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline></video>
+  <video id="video" autoplay playsinline muted></video>
   <div id="status">Conectando…</div>
 <script>
 (() => {
   const params = new URLSearchParams(location.search);
-  const src = params.get('src') || '';
+  const cameraId = params.get('camera_id') || '';
   const listen = params.get('listen') === '1';
   const microphone = params.get('microphone') === '1';
-  const rtcPort = params.get('rtc_port') || '1984';
   const video = document.getElementById('video');
   const status = document.getElementById('status');
   let pc;
@@ -32,15 +31,16 @@
 
   async function getMicrophone() {
     if (!microphone) return [];
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microfone indisponível neste contexto. Use HTTPS ou localhost.');
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microfone indisponível. Abra o app por HTTPS ou localhost.');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false,
+    });
     return stream.getAudioTracks();
   }
 
   async function connect() {
-    if (!src) throw new Error('Stream não informado.');
+    if (!cameraId) throw new Error('Câmera não informada.');
     pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] });
-
     pc.addTransceiver('video', { direction: 'recvonly' });
     if (listen) pc.addTransceiver('audio', { direction: 'recvonly' });
 
@@ -52,12 +52,10 @@
 
     const remoteTracks = [];
     pc.addEventListener('track', event => {
-      remoteTracks.push(event.track);
+      if (!remoteTracks.includes(event.track)) remoteTracks.push(event.track);
       video.srcObject = new MediaStream(remoteTracks);
-      // Unlike go2rtc's stock webrtc.html, this player may actually unmute
-      // after the user's explicit Audio button click.
       video.muted = !listen;
-      video.play().catch(() => report('autoplay-blocked', 'Clique no vídeo para iniciar o áudio.'));
+      video.play().catch(() => report('autoplay-blocked', 'Toque no vídeo para iniciar o áudio.'));
     });
     video.addEventListener('click', () => video.play().catch(() => {}));
 
@@ -67,9 +65,9 @@
     });
 
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Native mode talks straight to go2rtc. Under HTTPS a reverse proxy/Tailscale
-    // endpoint for port 1984 is required; the parent reports a useful error if it fails.
-    ws = new WebSocket(`${scheme}://${location.hostname}:${rtcPort}/api/ws?src=${encodeURIComponent(src)}`);
+    // Same-origin proxy handled by FastAPI. This works through Tailscale Serve,
+    // installed PWAs and normal localhost without exposing go2rtc :1984.
+    ws = new WebSocket(`${scheme}://${location.host}/api/cameras/${encodeURIComponent(cameraId)}/webrtc/ws`);
     ws.addEventListener('open', async () => {
       pc.addEventListener('icecandidate', event => {
         if (event.candidate && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'webrtc/candidate', value: event.candidate.candidate }));
@@ -84,7 +82,7 @@
       else if (msg.type === 'webrtc/answer') pc.setRemoteDescription({ type: 'answer', sdp: msg.value }).catch(error => report('webrtc-error', error.message));
       else if (msg.type === 'error') report('webrtc-error', msg.value || 'Falha WebRTC');
     });
-    ws.addEventListener('error', () => report('signal-error', 'Não foi possível acessar a sinalização WebRTC do go2rtc.'));
+    ws.addEventListener('error', () => report('signal-error', 'Falha na sinalização WebRTC pelo PersonOfInterest.'));
     ws.addEventListener('close', () => {
       if (pc && !['closed','failed'].includes(pc.connectionState)) report('signal-closed', 'Sinalização WebRTC encerrada.');
     });
@@ -96,7 +94,6 @@
     try { pc?.close(); } catch (_) {}
   }
   addEventListener('beforeunload', cleanup);
-
   video.muted = !listen;
   connect().catch(error => report('webrtc-error', error?.message || String(error)));
 })();
