@@ -12,6 +12,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     EVENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -61,6 +67,7 @@ def init_db() -> None:
                 vision_enabled INTEGER NOT NULL DEFAULT 1,
                 auto_follow_enabled INTEGER NOT NULL DEFAULT 0,
                 selected_track_id INTEGER,
+                home_preset_set INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
             );
@@ -71,6 +78,12 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             );
             """
+        )
+        _ensure_column(
+            conn,
+            "camera_runtime_settings",
+            "home_preset_set",
+            "home_preset_set INTEGER NOT NULL DEFAULT 0",
         )
         conn.execute(
             """
