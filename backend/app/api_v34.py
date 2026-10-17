@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, WebSoc
 from fastapi.responses import FileResponse
 
 from .alerts import manager as alert_manager
-from .config import GO2RTC_API_URL
+from .config import FACES_DIR, GO2RTC_API_URL
 from .db import connection, utc_now
 from .identity import manager as identity_manager
 from .models import AlertRuleCreate, AlertRuleUpdate, IdentityAssignRequest, PushSubscriptionRequest
@@ -179,6 +179,104 @@ def assign_identity_event(event_id: int, payload: IdentityAssignRequest) -> dict
 @router.post("/api/identity/reindex")
 def identity_reindex(include_no_face: bool = False) -> dict:
     return identity_manager.reindex(include_no_face=include_no_face)
+
+
+def _delete_face_crop(relative: str | None) -> None:
+    if not relative:
+        return
+    path = (FACES_DIR / relative).resolve()
+    root = FACES_DIR.resolve()
+    if root not in path.parents:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+@router.patch("/api/events/{event_id}/false-positive")
+def set_event_false_positive(event_id: int, value: bool = Query(...)) -> dict:
+    """Mark/unmark a detection as a false positive.
+
+    Marking one invalidates any identity sample produced from that event. If it
+    belonged to an unknown cluster, that cluster is rebuilt from the remaining
+    events so a bad detection cannot poison its centroid/history.
+    """
+    crops_to_delete: set[str] = set()
+    with connection() as conn:
+        event = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Evento não encontrado")
+
+        if value:
+            sample = conn.execute(
+                "SELECT cluster_id, crop_path FROM face_samples WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            cluster_id = event["unknown_cluster_id"] or (sample["cluster_id"] if sample else None)
+
+            if cluster_id is not None:
+                samples = conn.execute(
+                    "SELECT event_id, crop_path FROM face_samples WHERE cluster_id = ?",
+                    (cluster_id,),
+                ).fetchall()
+                crops_to_delete.update(str(row["crop_path"]) for row in samples if row["crop_path"])
+                conn.execute("DELETE FROM face_samples WHERE cluster_id = ?", (cluster_id,))
+                conn.execute(
+                    """UPDATE events
+                    SET person_id = NULL, unknown_cluster_id = NULL,
+                        identity_state = 'pending', identity_confidence = NULL
+                    WHERE unknown_cluster_id = ? AND id <> ?
+                      AND COALESCE(identity_state, '') <> 'false_positive'""",
+                    (cluster_id, event_id),
+                )
+                conn.execute("DELETE FROM unknown_clusters WHERE id = ?", (cluster_id,))
+
+            current_sample = conn.execute(
+                "SELECT crop_path FROM face_samples WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if current_sample and current_sample["crop_path"]:
+                crops_to_delete.add(str(current_sample["crop_path"]))
+            conn.execute("DELETE FROM face_samples WHERE event_id = ?", (event_id,))
+            conn.execute(
+                """UPDATE events
+                SET person_id = NULL, unknown_cluster_id = NULL,
+                    identity_state = 'false_positive', identity_confidence = NULL
+                WHERE id = ?""",
+                (event_id,),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO alert_event_state(event_id, evaluated_at) VALUES (?, ?)",
+                (event_id, utc_now()),
+            )
+        else:
+            current_sample = conn.execute(
+                "SELECT crop_path FROM face_samples WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if current_sample and current_sample["crop_path"]:
+                crops_to_delete.add(str(current_sample["crop_path"]))
+            conn.execute("DELETE FROM face_samples WHERE event_id = ?", (event_id,))
+            conn.execute(
+                """UPDATE events
+                SET person_id = NULL, unknown_cluster_id = NULL,
+                    identity_state = 'pending', identity_confidence = NULL
+                WHERE id = ?""",
+                (event_id,),
+            )
+            conn.execute("DELETE FROM alert_event_state WHERE event_id = ?", (event_id,))
+        conn.commit()
+
+    for crop in crops_to_delete:
+        _delete_face_crop(crop)
+
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "is_false_positive": bool(value),
+        "identity_state": "false_positive" if value else "pending",
+    }
 
 
 # ------------------------------- V4 Web Push -------------------------------
@@ -348,7 +446,7 @@ def stats_summary(
     from_ts: str | None = None,
     to_ts: str | None = None,
 ) -> dict:
-    where: list[str] = []
+    where: list[str] = ["COALESCE(e.identity_state, '') <> 'false_positive'"]
     params: list[object] = []
     if camera_id is not None:
         where.append("e.camera_id = ?")
@@ -362,7 +460,7 @@ def stats_summary(
     if to_ts:
         where.append("e.created_at <= ?")
         params.append(to_ts)
-    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    clause = " WHERE " + " AND ".join(where)
     with connection() as conn:
         totals = conn.execute(
             f"""SELECT COUNT(*) total,
