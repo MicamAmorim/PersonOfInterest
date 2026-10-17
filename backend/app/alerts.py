@@ -163,6 +163,8 @@ class AlertManager:
             self._deliver(rule, event)
 
     def _matches(self, rule: dict[str, Any], event: dict[str, Any]) -> bool:
+        if event.get("identity_state") == "false_positive":
+            return False
         if rule.get("camera_id") is not None and int(rule["camera_id"]) != int(event["camera_id"]):
             return False
         if rule.get("unknown_only"):
