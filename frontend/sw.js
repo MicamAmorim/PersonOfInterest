@@ -1,5 +1,5 @@
-const CACHE = 'personofinterest-v2.4.2';
-const SHELL = ['/', '/styles.css', '/v2.css', '/app-core.js', '/app-runtime.js', '/camera-webrtc.html', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'personofinterest-v4.0';
+const SHELL = ['/', '/styles.css', '/v2.css', '/v34.css', '/app-core.js', '/app-runtime.js', '/v34.js', '/camera-webrtc.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
@@ -24,4 +24,39 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/')))
   );
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; }
+  catch (_) { data = { body: event.data ? event.data.text() : 'Novo alerta' }; }
+  const title = data.title || 'PersonOfInterest';
+  const options = {
+    body: data.body || 'Novo evento detectado.',
+    icon: '/icon.svg',
+    badge: '/icon.svg',
+    tag: data.tag || `poi-${Date.now()}`,
+    renotify: true,
+    data: { url: data.url || '/', event_id: data.event_id || null },
+  };
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    self.registration.setAppBadge ? self.registration.setAppBadge() : Promise.resolve(),
+  ]));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil((async () => {
+    const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if ('focus' in client) {
+        try { await client.navigate(target); } catch (_) {}
+        await client.focus();
+        return;
+      }
+    }
+    if (clients.openWindow) await clients.openWindow(target);
+  })());
 });
