@@ -51,7 +51,11 @@ def sofia_hash(password: str) -> str:
 
 
 def direction_from_vector(pan: float, tilt: float, deadzone: float = 0.18) -> str | None:
-    """Convert PersonOfInterest logical axes into native DVRIP direction names.
+    """Convert logical UI directions into native DVRIP direction names.
+
+    The tested cameras are horizontally mirrored relative to DVRIP's naming:
+    a physical/UI left command requires DirectionRight and vice versa.
+    Vertical directions are unchanged.
 
     pan:  +right / -left
     tilt: +up / -down
@@ -62,14 +66,14 @@ def direction_from_vector(pan: float, tilt: float, deadzone: float = 0.18) -> st
     vertical = 0 if abs(tilt) < deadzone else (1 if tilt > 0 else -1)
     mapping = {
         (0, 0): None,
-        (1, 0): "DirectionRight",
-        (-1, 0): "DirectionLeft",
+        (1, 0): "DirectionLeft",
+        (-1, 0): "DirectionRight",
         (0, 1): "DirectionUp",
         (0, -1): "DirectionDown",
-        (1, 1): "DirectionRightUp",
-        (1, -1): "DirectionRightDown",
-        (-1, 1): "DirectionLeftUp",
-        (-1, -1): "DirectionLeftDown",
+        (1, 1): "DirectionLeftUp",
+        (1, -1): "DirectionLeftDown",
+        (-1, 1): "DirectionRightUp",
+        (-1, -1): "DirectionRightDown",
     }
     return mapping[(horizontal, vertical)]
 
@@ -191,7 +195,6 @@ def _dvrip_pulse(rtsp_url: str, pan: float, tilt: float, speed: float, duration:
         step = max(1, min(30, int(round(max(0.05, min(1.0, speed)) * 30))))
         sequence = _dvrip_send_ptz(sock, session, sequence, command, step, 65535)
         time.sleep(max(0.08, min(1.5, float(duration))))
-        # Compatibility stop used by the iCSee/XMEye DVRIP ecosystem.
         _dvrip_send_ptz(sock, session, sequence, "DirectionUp", 5, -1)
     finally:
         sock.close()
@@ -209,7 +212,6 @@ def _dvrip_stop(rtsp_url: str) -> None:
 
 
 # --- ONVIF fallback for non-iCSee cameras ---------------------------------
-
 def _security_header(username: str, password: str) -> str:
     if not username:
         return ""
