@@ -16,6 +16,15 @@ class VisionTrackerTests(unittest.TestCase):
         self.assertGreaterEqual(second[0].hits, 2)
         self.assertTrue(second[0].control_valid)
 
+    def test_velocity_estimate_follows_same_track_motion(self):
+        tracker = CentroidTracker()
+        tracker.update([((100, 100, 80, 180), 0.9)], (480, 640, 3))
+        moving = tracker.update([((118, 100, 80, 180), 0.9)], (480, 640, 3))[0]
+        self.assertTrue(moving.control_valid)
+        self.assertGreater(moving.velocity_x, 0.0)
+        self.assertLessEqual(abs(moving.velocity_x), 1.2)
+        self.assertLessEqual(abs(moving.velocity_y), 1.2)
+
     def test_far_detection_creates_another_track(self):
         tracker = CentroidTracker()
         tracker.update([((20, 20, 70, 160), 0.8)], (480, 640, 3))
