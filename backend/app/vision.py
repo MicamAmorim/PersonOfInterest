@@ -13,6 +13,8 @@ from .config import (
     EVENTS_DIR,
     VISION_AUTOFOLLOW_MAX_SPEED,
     VISION_EVENT_COOLDOWN_SECONDS,
+    VISION_FACE_SEARCH_AFTER,
+    VISION_FACE_SEARCH_MAX_SPEED,
     VISION_MAX_TARGET_SPEED,
     VISION_MAX_WIDTH,
     VISION_MODEL_PATH,
@@ -46,6 +48,10 @@ class Track:
     missed: int = 0
     has_face: bool = False
     face_count: int = 0
+    face_cx: float | None = None
+    face_cy: float | None = None
+    last_face_monotonic: float | None = None
+    face_seen_now: bool = False
     event_id: int | None = None
     created_monotonic: float = field(default_factory=time.monotonic)
     last_seen_monotonic: float = field(default_factory=time.monotonic)
@@ -131,14 +137,16 @@ def _update_control_measurement(
     track.control_valid = valid
     track.control_reason = reason
     if not valid:
+        # A weak or partial box may keep identity but cannot inject a sudden
+        # position/velocity jump into the PTZ controller.
         track.velocity_x *= 0.72
         track.velocity_y *= 0.72
         return
 
     previous_x = float(track.smooth_cx)
     previous_y = float(track.smooth_cy)
-    dt = max(0.05, min(1.5, now - float(track.last_control_monotonic or now)))
-    alpha = 0.28 if jump < 0.07 else 0.42
+    dt = max(0.05, min(1.2, now - float(track.last_control_monotonic or now)))
+    alpha = 0.31 if jump < 0.07 else 0.48
     track.smooth_cx = (1 - alpha) * previous_x + alpha * cx
     track.smooth_cy = (1 - alpha) * previous_y + alpha * cy
     track.smooth_w = (1 - alpha) * float(track.smooth_w or w) + alpha * w
@@ -147,7 +155,7 @@ def _update_control_measurement(
     raw_vx = ((track.smooth_cx - previous_x) / max(1.0, width)) / dt
     raw_vy = ((track.smooth_cy - previous_y) / max(1.0, height)) / dt
     raw_vx, raw_vy = _clamp_vector(raw_vx, raw_vy, VISION_MAX_TARGET_SPEED)
-    beta = 0.34 if track.hits >= 4 else 0.24
+    beta = 0.40 if track.hits >= 4 else 0.28
     track.velocity_x = (1 - beta) * track.velocity_x + beta * raw_vx
     track.velocity_y = (1 - beta) * track.velocity_y + beta * raw_vy
     track.velocity_x, track.velocity_y = _clamp_vector(track.velocity_x, track.velocity_y, VISION_MAX_TARGET_SPEED)
@@ -173,20 +181,20 @@ class CentroidTracker:
         best_score = -1.0
         tcx, tcy = _center(track.bbox)
         min_overlap = 0.06 if relaxed else 0.10
-        max_distance = 0.11 if relaxed else 0.13
+        max_distance = 0.12 if relaxed else 0.14
         for idx in candidate_indices:
             bbox, _ = detections[idx]
             dcx, dcy = _center(bbox)
             distance = math.hypot(tcx - dcx, tcy - dcy) / max(diag, 1.0)
             overlap = _iou(track.bbox, bbox)
-            score = overlap * 1.7 + max(0.0, 0.24 - distance)
+            score = overlap * 1.7 + max(0.0, 0.26 - distance)
             if (overlap >= min_overlap or distance <= max_distance) and score > best_score:
                 best_idx, best_score = idx, score
         return best_idx
 
     def update(self, detections: list[tuple[tuple[int, int, int, int], float]], frame_shape: tuple[int, ...]) -> list[Track]:
-        height, width = frame_shape[:2]
-        diag = math.hypot(width, height)
+        _, width = frame_shape[:2]
+        diag = math.hypot(width, frame_shape[0])
         high = {i for i, (_, conf) in enumerate(detections) if conf >= self.high_confidence}
         low = {i for i, (_, conf) in enumerate(detections) if conf < self.high_confidence}
         unmatched_tracks: list[Track] = []
@@ -224,6 +232,7 @@ class CentroidTracker:
             track.control_reason = "missed"
             track.velocity_x *= 0.68
             track.velocity_y *= 0.68
+            track.face_seen_now = False
             if track.missed > 6:
                 self.tracks.pop(track.id, None)
 
@@ -235,6 +244,56 @@ class CentroidTracker:
             self.next_id += 1
 
         return [t for t in self.tracks.values() if t.missed <= 3]
+
+
+class LatestFrameReader:
+    """Continuously drain RTSP so inference always receives the newest frame.
+
+    OpenCV/FFmpeg often buffers RTSP even when CAP_PROP_BUFFERSIZE is ignored.
+    Reading on a dedicated thread and keeping only one frame prevents inference
+    from working through stale queued frames, which is critical for PTZ control.
+    """
+
+    def __init__(self, source_url: str) -> None:
+        self.cap = cv2.VideoCapture(source_url, cv2.CAP_FFMPEG)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.frame: Any | None = None
+        self.frame_at = 0.0
+        self.seq = 0
+        self.failed = False
+        self.thread = threading.Thread(target=self._run, name="poi-frame-drain", daemon=True)
+
+    @property
+    def opened(self) -> bool:
+        return bool(self.cap.isOpened())
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def _run(self) -> None:  # pragma: no cover - camera boundary
+        while not self.stop_event.is_set():
+            ok, frame = self.cap.read()
+            if not ok or frame is None:
+                self.failed = True
+                return
+            with self.lock:
+                self.frame = frame
+                self.frame_at = time.monotonic()
+                self.seq += 1
+
+    def latest(self, previous_seq: int) -> tuple[Any | None, int, float]:
+        with self.lock:
+            if self.frame is None or self.seq == previous_seq:
+                return None, previous_seq, self.frame_at
+            return self.frame.copy(), self.seq, self.frame_at
+
+    def close(self) -> None:
+        self.stop_event.set()
+        self.cap.release()
+        if self.thread.is_alive():
+            self.thread.join(timeout=0.5)
 
 
 class CameraVisionWorker(threading.Thread):
@@ -249,7 +308,9 @@ class CameraVisionWorker(threading.Thread):
         self.tracker = CentroidTracker(VISION_PERSON_CONFIDENCE)
         self.last_event_at = 0.0
         self.last_follow_move = 0.0
+        self.last_face_search_move = 0.0
         self.follow_speed = 0.0
+        self.capture_latency_ms = 0.0
         self.status = "starting"
         self.error: str | None = None
         self.frame_size = (0, 0)
@@ -280,32 +341,54 @@ class CameraVisionWorker(threading.Thread):
             return
 
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        target_interval = 1.0 / max(0.2, VISION_PROCESS_FPS)
+        target_interval = 1.0 / max(0.5, VISION_PROCESS_FPS)
         while not self.stop_event.is_set():
-            cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            if not cap.isOpened():
+            reader = LatestFrameReader(self.source_url)
+            if not reader.opened:
+                reader.close()
                 self.status = "error"
                 self.error = "Não foi possível abrir o restream local para visão computacional"
-                time.sleep(2.0)
+                time.sleep(1.0)
                 continue
+
+            reader.start()
             self.status, self.error = "running", None
+            last_seq = -1
             last_processed = 0.0
             try:
-                while not self.stop_event.is_set():
-                    ok, frame = cap.read()
-                    if not ok or frame is None:
-                        self.status = "reconnecting"
-                        break
+                while not self.stop_event.is_set() and not reader.failed:
                     now = time.monotonic()
-                    if now - last_processed < target_interval:
+                    wait = target_interval - (now - last_processed)
+                    if wait > 0:
+                        time.sleep(min(0.02, wait))
                         continue
-                    last_processed = now
+                    frame, seq, frame_at = reader.latest(last_seq)
+                    if frame is None:
+                        time.sleep(0.005)
+                        continue
+                    last_seq = seq
+                    last_processed = time.monotonic()
+                    self.capture_latency_ms = max(0.0, (last_processed - frame_at) * 1000.0)
                     self._process(frame, detector, face_cascade)
             finally:
-                cap.release()
+                reader.close()
             if not self.stop_event.is_set():
-                time.sleep(1.0)
+                self.status = "reconnecting"
+                time.sleep(0.35)
+
+    def _faces_for_track(self, gray: Any, track: Track, width: int, height: int, face_cascade: Any) -> list[tuple[int, int, int, int]]:
+        x, y, w, h = track.bbox
+        # Search well above a partial body box too: if only legs are visible, the
+        # face may enter the frame just above the current detection after PTZ tilts.
+        x1 = max(0, x - int(w * 0.18))
+        x2 = min(width, x + w + int(w * 0.18))
+        y1 = max(0, y - int(h * 1.10))
+        y2 = min(height, y + int(h * 0.62))
+        if x2 - x1 < 34 or y2 - y1 < 34:
+            return []
+        roi = gray[y1:y2, x1:x2]
+        local = face_cascade.detectMultiScale(roi, scaleFactor=1.12, minNeighbors=5, minSize=(28, 28))
+        return [(x1 + int(fx), y1 + int(fy), int(fw), int(fh)) for fx, fy, fw, fh in local]
 
     def _process(self, frame: Any, detector: YoloXPersonDetector, face_cascade: Any) -> None:
         h0, w0 = frame.shape[:2]
@@ -317,36 +400,43 @@ class CameraVisionWorker(threading.Thread):
         tracks = self.tracker.update(detector.detect(frame), frame.shape)
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(34, 34))
-        face_boxes = [tuple(map(int, f)) for f in faces]
+        now = time.monotonic()
         for track in tracks:
-            x, y, w, h = track.bbox
-            associated = []
-            for face in face_boxes:
-                fx, fy, fw, fh = face
-                cx, cy = fx + fw / 2, fy + fh / 2
-                if x <= cx <= x + w and y <= cy <= y + h:
-                    associated.append(face)
+            track.face_seen_now = False
+            associated = self._faces_for_track(gray, track, width, height, face_cascade)
             had_face_before = track.has_face
             if associated:
+                # Prefer the largest face if a ROI happens to contain another person.
+                fx, fy, fw, fh = max(associated, key=lambda f: f[2] * f[3])
+                measured_x, measured_y = fx + fw / 2, fy + fh / 2
+                if track.face_cx is None:
+                    track.face_cx, track.face_cy = measured_x, measured_y
+                else:
+                    track.face_cx = 0.55 * track.face_cx + 0.45 * measured_x
+                    track.face_cy = 0.55 * float(track.face_cy or measured_y) + 0.45 * measured_y
+                track.last_face_monotonic = now
+                track.face_seen_now = True
                 track.has_face = True
                 track.face_count = max(track.face_count, len(associated))
-            if track.hits >= 2 and track.confidence >= VISION_PERSON_CONFIDENCE and track.event_id is None and time.monotonic() - self.last_event_at >= VISION_EVENT_COOLDOWN_SECONDS:
+
+            if track.hits >= 2 and track.confidence >= VISION_PERSON_CONFIDENCE and track.event_id is None and now - self.last_event_at >= VISION_EVENT_COOLDOWN_SECONDS:
                 track.event_id = self._save_event(frame, track, associated)
-                self.last_event_at = time.monotonic()
+                self.last_event_at = now
             elif track.event_id and associated and not had_face_before:
                 self._mark_face(track.event_id, len(associated))
 
-        horizon = max(0.0, min(0.8, VISION_PREDICTION_HORIZON))
+        horizon = max(0.0, min(0.7, VISION_PREDICTION_HORIZON))
         self.tracks_state = [
             {
                 "track_id": t.id,
                 "bbox": {"x": t.bbox[0] / width, "y": t.bbox[1] / height, "w": t.bbox[2] / width, "h": t.bbox[3] / height},
                 "confidence": round(float(t.confidence), 3),
                 "has_face": t.has_face,
+                "face_seen_now": t.face_seen_now,
                 "face_count": t.face_count,
                 "control_valid": t.control_valid,
                 "control_reason": t.control_reason,
+                "face_search": self._needs_face_search(t, height),
                 "velocity": {"x": round(t.velocity_x, 3), "y": round(t.velocity_y, 3)},
                 "predicted_center": (
                     {
@@ -391,10 +481,21 @@ class CameraVisionWorker(threading.Thread):
 
     @staticmethod
     def _axis_command(error: float, active: bool) -> tuple[float, bool]:
-        threshold = 0.10 if active else 0.17
+        threshold = 0.085 if active else 0.145
         if abs(error) < threshold:
             return 0.0, False
         return (1.0 if error > 0 else -1.0), True
+
+    def _needs_face_search(self, track: Track, height: int) -> bool:
+        if track.face_seen_now:
+            return False
+        no_face_since = track.last_face_monotonic or track.created_monotonic
+        if time.monotonic() - no_face_since < VISION_FACE_SEARCH_AFTER:
+            return False
+        _, y, _, h = track.bbox
+        bottom = y + h
+        lower_or_partial = y > height * 0.36 or bottom > height * 0.90
+        return track.confidence >= VISION_PERSON_CONFIDENCE and track.hits >= 3 and lower_or_partial
 
     def _handle_lost_target(self, settings: dict[str, Any]) -> None:
         now = time.monotonic()
@@ -406,6 +507,25 @@ class CameraVisionWorker(threading.Thread):
         self.home_returned_for_loss = True
         threading.Thread(target=self._return_home, daemon=True).start()
 
+    def _partial_lower_body_recovery(self, target: Track, height: int, camera_ceiling: float) -> bool:
+        """For a trustworthy lower-body fragment, search upward only.
+
+        We intentionally do not use the fragment's horizontal center or velocity:
+        this prevents a legs-only/edge box from throwing pan control sideways.
+        """
+        if target.control_reason != "partial_edge" or not self._needs_face_search(target, height):
+            return False
+        _, y, _, h = target.bbox
+        if y + h < height * 0.92:
+            return False
+        now = time.monotonic()
+        if now - self.last_face_search_move < 0.34:
+            return True
+        self.last_face_search_move = now
+        speed = min(camera_ceiling, VISION_FACE_SEARCH_MAX_SPEED)
+        threading.Thread(target=self._ptz_pulse, args=(0.0, 1.0, speed, 0.10), daemon=True).start()
+        return True
+
     def _auto_follow(self, tracks: list[Track], width: int, height: int) -> None:
         settings = self.manager.settings_for(self.camera_id)
         if not settings.get("auto_follow_enabled"):
@@ -415,12 +535,22 @@ class CameraVisionWorker(threading.Thread):
             self.follow_speed = 0.0
             return
 
+        hard_ceiling = max(0.20, min(0.90, VISION_AUTOFOLLOW_MAX_SPEED))
+        camera_ceiling = max(0.20, min(hard_ceiling, float(settings.get("autofollow_max_speed", 0.65))))
         selected = settings.get("selected_track_id")
         if selected:
-            target = next((t for t in tracks if t.id == selected and t.control_valid), None)
+            raw_target = next((t for t in tracks if t.id == selected), None)
         else:
-            valid = [t for t in tracks if t.control_valid]
-            target = max(valid, key=lambda t: t.bbox[2] * t.bbox[3]) if valid else None
+            candidates = [t for t in tracks if t.control_valid or t.control_reason == "partial_edge"]
+            raw_target = max(candidates, key=lambda t: t.bbox[2] * t.bbox[3]) if candidates else None
+
+        if raw_target is not None and self._partial_lower_body_recovery(raw_target, height, camera_ceiling):
+            self.target_lost_since = None
+            self.home_returned_for_loss = False
+            self.pan_active = False
+            return
+
+        target = raw_target if raw_target is not None and raw_target.control_valid else None
         if target is None or target.smooth_cx is None or target.smooth_cy is None:
             self.pan_active = self.tilt_active = False
             self.follow_speed *= 0.65
@@ -429,41 +559,50 @@ class CameraVisionWorker(threading.Thread):
 
         self.target_lost_since = None
         self.home_returned_for_loss = False
-        horizon = max(0.0, min(0.8, VISION_PREDICTION_HORIZON))
+        horizon = max(0.0, min(0.7, VISION_PREDICTION_HORIZON))
+
+        # Horizontal aim stays at body/face center. Vertically, favor the upper
+        # torso; if a face was just detected, use its actual center. This both
+        # keeps faces in frame and avoids centering the camera on a person's legs.
         current_x = target.smooth_cx / max(1.0, width)
-        current_y = target.smooth_cy / max(1.0, height)
+        face_recent = target.last_face_monotonic is not None and time.monotonic() - target.last_face_monotonic < 0.85
+        if face_recent and target.face_cx is not None and target.face_cy is not None:
+            current_x = 0.72 * current_x + 0.28 * (target.face_cx / max(1.0, width))
+            current_y = target.face_cy / max(1.0, height)
+        else:
+            upper_anchor = float(target.smooth_cy) - 0.20 * float(target.smooth_h or 0.0)
+            if self._needs_face_search(target, height):
+                upper_anchor -= min(height * 0.08, float(target.smooth_h or 0.0) * 0.18)
+            current_y = upper_anchor / max(1.0, height)
+
         predicted_x = max(0.03, min(0.97, current_x + target.velocity_x * horizon))
         predicted_y = max(0.03, min(0.97, current_y + target.velocity_y * horizon))
         dx, dy = predicted_x - 0.5, predicted_y - 0.5
         pan, self.pan_active = self._axis_command(dx, self.pan_active)
         tilt, self.tilt_active = self._axis_command(-dy, self.tilt_active)
         if not (pan or tilt):
-            self.follow_speed *= 0.60
+            self.follow_speed *= 0.55
             return
 
-        hard_ceiling = max(0.20, min(0.90, VISION_AUTOFOLLOW_MAX_SPEED))
-        camera_ceiling = max(0.20, min(hard_ceiling, float(settings.get("autofollow_max_speed", 0.65))))
         motion = min(VISION_MAX_TARGET_SPEED, math.hypot(target.velocity_x, target.velocity_y))
         error = max(abs(dx), abs(dy))
+        requested_speed = 0.14 + error * 0.68 + min(0.34, motion * 0.38)
+        requested_speed = max(0.16, min(camera_ceiling, requested_speed))
 
-        # Position feedback + velocity feed-forward. Motion contributes more than
-        # before, but only inside the user-selected per-camera ceiling.
-        requested_speed = 0.13 + error * 0.60 + min(0.30, motion * 0.32)
-        requested_speed = max(0.15, min(camera_ceiling, requested_speed))
-
-        # Faster targets may accelerate the servo faster, still with a slew-rate
-        # limit to avoid abrupt motor commands caused by noisy detections.
-        blended = 0.56 * self.follow_speed + 0.44 * requested_speed if self.follow_speed else requested_speed
-        max_delta = 0.07 + min(0.09, motion * 0.09)
+        # Faster response than v0.2.3, but still slew-limited and bounded by the
+        # per-camera maximum. Fresh-frame draining removes most apparent delay;
+        # this term handles the remaining motor/network latency.
+        blended = 0.42 * self.follow_speed + 0.58 * requested_speed if self.follow_speed else requested_speed
+        max_delta = 0.10 + min(0.11, motion * 0.11)
         if self.follow_speed:
             blended = max(self.follow_speed - max_delta, min(self.follow_speed + max_delta, blended))
-        self.follow_speed = max(0.14, min(camera_ceiling, blended))
+        self.follow_speed = max(0.15, min(camera_ceiling, blended))
 
-        min_interval = max(0.28, 0.48 - min(0.18, motion * 0.18))
+        min_interval = max(0.18, 0.31 - min(0.11, motion * 0.12))
         now = time.monotonic()
         if now - self.last_follow_move < min_interval:
             return
-        duration = min(0.20, max(0.10, 0.10 + error * 0.14))
+        duration = min(0.16, max(0.08, 0.08 + error * 0.12))
         self.last_follow_move = now
         threading.Thread(target=self._ptz_pulse, args=(pan, tilt, self.follow_speed, duration), daemon=True).start()
 
@@ -499,6 +638,7 @@ class CameraVisionWorker(threading.Thread):
             "target_lost_seconds": round(lost_for, 2),
             "follow_speed": round(self.follow_speed, 3),
             "prediction_horizon": VISION_PREDICTION_HORIZON,
+            "capture_latency_ms": round(self.capture_latency_ms, 1),
             "ptz_error": self.manager.ptz_errors.get(self.camera_id),
         }
 
