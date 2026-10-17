@@ -64,9 +64,10 @@ def _close_conversation(manager: Any, camera_id: int) -> None:
     manager._poi_conversation_ready_at[camera_id] = 0.0
 
 
-def _set_mute(manager: Any, camera_id: int) -> float:
+def _set_mute(manager: Any, camera_id: int, seconds: float | None = None) -> float:
     _ensure_conversation_state(manager)
-    mute_until = time.monotonic() + max(0.0, WAKE_AFTER_SPEECH_MUTE_SECONDS)
+    duration = WAKE_AFTER_SPEECH_MUTE_SECONDS if seconds is None else seconds
+    mute_until = time.monotonic() + max(0.0, duration)
     manager._poi_audio_mute_until[camera_id] = mute_until
     return mute_until
 
@@ -118,7 +119,12 @@ def _speak_answer(
     try:
         assistant_manager.speak(camera_id, response, voice_gender=voice_gender)
         manager._last_trigger_monotonic[camera_id] = time.monotonic()
-        mute_until = _set_mute(manager, camera_id)
+        # A final answer keeps the longer anti-echo guard used by V4.4. The short
+        # "Pode falar" prompt needs a smaller guard so the user can answer
+        # naturally; its TTS phrase is short, while the actual question window
+        # starts only after this guard expires.
+        mute_seconds = min(WAKE_AFTER_SPEECH_MUTE_SECONDS, 2.5) if open_conversation else WAKE_AFTER_SPEECH_MUTE_SECONDS
+        mute_until = _set_mute(manager, camera_id, mute_seconds)
         if open_conversation:
             ready_at = mute_until
             manager._poi_conversation_ready_at[camera_id] = ready_at
