@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.4.3"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -55,6 +55,18 @@ BODY_REID_THRESHOLD = float(os.getenv("BODY_REID_THRESHOLD", "0.72"))
 BODY_REID_MARGIN = float(os.getenv("BODY_REID_MARGIN", "0.045"))
 BODY_REID_FACE_BONUS = float(os.getenv("BODY_REID_FACE_BONUS", "0.035"))
 BODY_REID_POLL_SECONDS = float(os.getenv("BODY_REID_POLL_SECONDS", "0.8"))
+
+# Learned detector hard-negatives. Manual false-positive reviews become an
+# appearance bank used only to reject future detections from the same camera.
+# Two similar reviewed negatives are preferred; a single example is accepted
+# only at a very high similarity and when the bounding boxes substantially
+# overlap (useful for stationary objects such as dolls/plush toys).
+BODY_NEGATIVE_THRESHOLD = float(os.getenv("BODY_NEGATIVE_THRESHOLD", "0.90"))
+BODY_NEGATIVE_SINGLE_THRESHOLD = float(os.getenv("BODY_NEGATIVE_SINGLE_THRESHOLD", "0.965"))
+BODY_NEGATIVE_MARGIN = float(os.getenv("BODY_NEGATIVE_MARGIN", "0.055"))
+BODY_NEGATIVE_MIN_SUPPORT = int(os.getenv("BODY_NEGATIVE_MIN_SUPPORT", "2"))
+BODY_NEGATIVE_BBOX_IOU = float(os.getenv("BODY_NEGATIVE_BBOX_IOU", "0.55"))
+BODY_NEGATIVE_MIN_QUALITY = float(os.getenv("BODY_NEGATIVE_MIN_QUALITY", "0.30"))
 
 # V4.2 camera assistant. A high-quality unknown face takes priority over body
 # guesses, preserving the rule that face evidence is stronger than appearance.
