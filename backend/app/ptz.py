@@ -120,22 +120,28 @@ def probe(rtsp_url: str) -> dict:
             "ok": True,
             "profile_token": session.profile_token,
             "ptz_url": session.ptz_url,
-            "axis_mapping": "icsee_rotated",
+            "axis_mapping": "icsee_rotated_inverted",
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
 def logical_to_onvif(pan: float, tilt: float) -> tuple[float, float]:
-    """Convert PersonOfInterest directions to the tested iCSee ONVIF axes.
+    """Convert PersonOfInterest directions to this iCSee/XM ONVIF orientation.
 
-    Logical coordinates use pan +right/-left and tilt +up/-down.
-    On the tested iCSee/XM firmware, ONVIF x+ moved down and y+ moved right,
-    therefore device_x = -logical_tilt and device_y = logical_pan.
+    Logical coordinates:
+      pan  +1 = right, -1 = left
+      tilt +1 = up,    -1 = down
+
+    Physical testing showed the device axes are rotated 90° and both signs are
+    opposite to the previous mapping: commanding southeast moved northwest.
+    Therefore the corrected mapping is:
+      device_x = logical_tilt
+      device_y = -logical_pan
     """
     logical_pan = max(-1.0, min(1.0, float(pan)))
     logical_tilt = max(-1.0, min(1.0, float(tilt)))
-    return -logical_tilt, logical_pan
+    return logical_tilt, -logical_pan
 
 
 def move(rtsp_url: str, pan: float, tilt: float, speed: float = 0.55, duration: float = 0.35) -> None:
