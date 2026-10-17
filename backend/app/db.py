@@ -57,6 +57,9 @@ def init_db() -> None:
                 camera_id INTEGER NOT NULL,
                 track_id INTEGER,
                 person_id INTEGER,
+                probable_person_id INTEGER,
+                body_confidence REAL,
+                body_identity_source TEXT,
                 unknown_cluster_id INTEGER,
                 identity_state TEXT NOT NULL DEFAULT 'pending',
                 identity_confidence REAL,
@@ -68,7 +71,8 @@ def init_db() -> None:
                 bbox_json TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
-                FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE SET NULL
+                FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE SET NULL,
+                FOREIGN KEY(probable_person_id) REFERENCES persons(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS unknown_clusters (
@@ -100,6 +104,33 @@ def init_db() -> None:
                 FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
                 FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE SET NULL,
                 FOREIGN KEY(cluster_id) REFERENCES unknown_clusters(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS body_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL UNIQUE,
+                camera_id INTEGER NOT NULL,
+                person_id INTEGER,
+                embedding BLOB NOT NULL,
+                quality REAL NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'unlabeled',
+                verified INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+                FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+                FOREIGN KEY(person_id) REFERENCES persons(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS body_negative_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL UNIQUE,
+                camera_id INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                quality REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE,
+                FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS camera_runtime_settings (
@@ -170,8 +201,11 @@ def init_db() -> None:
             """
         )
 
-        # Safe upgrades for installations created by V1/V2.
+        # Safe upgrades for installations created by earlier versions.
         _ensure_column(conn, "events", "person_id", "person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL")
+        _ensure_column(conn, "events", "probable_person_id", "probable_person_id INTEGER")
+        _ensure_column(conn, "events", "body_confidence", "body_confidence REAL")
+        _ensure_column(conn, "events", "body_identity_source", "body_identity_source TEXT")
         _ensure_column(conn, "events", "unknown_cluster_id", "unknown_cluster_id INTEGER")
         _ensure_column(conn, "events", "identity_state", "identity_state TEXT NOT NULL DEFAULT 'pending'")
         _ensure_column(conn, "events", "identity_confidence", "identity_confidence REAL")
@@ -185,10 +219,14 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_events_camera_created ON events(camera_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_person_created ON events(person_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_events_probable_person_created ON events(probable_person_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_cluster_created ON events(unknown_cluster_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_identity_state ON events(identity_state, created_at);
             CREATE INDEX IF NOT EXISTS idx_face_samples_person ON face_samples(person_id);
             CREATE INDEX IF NOT EXISTS idx_face_samples_cluster ON face_samples(cluster_id);
+            CREATE INDEX IF NOT EXISTS idx_body_samples_person ON body_samples(person_id, verified);
+            CREATE INDEX IF NOT EXISTS idx_body_samples_camera ON body_samples(camera_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_body_negative_camera ON body_negative_samples(camera_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_unknown_clusters_status ON unknown_clusters(status, last_seen DESC);
             CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled);
             CREATE INDEX IF NOT EXISTS idx_alert_deliveries_rule_created ON alert_deliveries(rule_id, created_at DESC);
