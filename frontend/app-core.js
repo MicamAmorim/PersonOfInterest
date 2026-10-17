@@ -207,15 +207,39 @@ function renderTimeline() {
       </div>
       <div class="event-meta"><div><strong>${escapeHtml(event.camera_name)}</strong><span>${escapeHtml(event.camera_location || 'Sem local')}</span></div><span class="status-pill ${identityClass}">${personLabel}</span></div>
       <div class="event-foot"><span>${when}</span><span>${event.has_face ? `Face detectada${event.face_count > 1 ? ` (${event.face_count})` : ''}` : 'Sem face útil'}</span></div>
+      <div class="event-actions"><button class="button ghost tiny" data-identify-event="${event.id}">${event.person_name ? 'Alterar identificação' : 'Identificar pessoa'}</button></div>
     </article>`;
   }).join('');
   $$('[data-delete-event]').forEach(el => el.addEventListener('click', (event) => { event.stopPropagation(); deleteTimelineEvent(Number(el.dataset.deleteEvent)); }));
+  $$('[data-identify-event]').forEach(el => el.addEventListener('click', (event) => { event.stopPropagation(); identifyTimelineEvent(Number(el.dataset.identifyEvent)); }));
   $$('[data-select-event]').forEach(el => el.addEventListener('change', () => {
     const id = Number(el.dataset.selectEvent);
     if (el.checked) state.selectedEventIds.add(id); else state.selectedEventIds.delete(id);
     renderTimeline();
   }));
   updateTimelineSelectionControls();
+}
+
+async function identifyTimelineEvent(id) {
+  const event = state.events.find(item => item.id === id);
+  if (!event) return;
+  const answer = prompt('Nome desta pessoa. Deixe vazio para remover a identificação:', event.person_name || '');
+  if (answer === null) return;
+  const name = answer.trim();
+  try {
+    let personId = null;
+    if (name) {
+      let person = state.persons.find(item => item.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0);
+      if (!person) {
+        person = await api('/api/persons', { method: 'POST', body: JSON.stringify({ name }) });
+        state.persons.push(person);
+      }
+      personId = person.id;
+    }
+    await api(`/api/events/${id}/person`, { method: 'PATCH', body: JSON.stringify({ person_id: personId }) });
+    await Promise.all([loadPersons(), loadEvents()]);
+    toast(name ? `Evento identificado como ${name}.` : 'Identificação removida.');
+  } catch (error) { toast(`Identificação: ${error.message}`, 'error'); }
 }
 
 function toggleSelectAllTimelineEvents() {
@@ -245,6 +269,7 @@ async function deleteSelectedTimelineEvents() {
     const result = await api('/api/events/delete-bulk', { method: 'POST', body: JSON.stringify({ ids }) });
     state.selectedEventIds.clear();
     await loadEvents();
+    await loadPersons();
     toast(`${result.deleted || ids.length} evento(s) excluído(s).`);
   } catch (error) { toast(error.message, 'error'); }
 }
