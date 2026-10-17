@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -26,7 +26,9 @@ VISION_TRACK_LOW_CONFIDENCE = float(os.getenv("VISION_TRACK_LOW_CONFIDENCE", "0.
 VISION_NMS_THRESHOLD = float(os.getenv("VISION_NMS_THRESHOLD", "0.45"))
 VISION_PREDICTION_HORIZON = float(os.getenv("VISION_PREDICTION_HORIZON", "0.38"))
 VISION_MAX_TARGET_SPEED = float(os.getenv("VISION_MAX_TARGET_SPEED", "1.20"))
-VISION_AUTOFOLLOW_MAX_SPEED = float(os.getenv("VISION_AUTOFOLLOW_MAX_SPEED", "0.46"))
+# Absolute safety ceiling. Each camera has its own lower/equal configurable
+# auto-follow maximum stored in camera_runtime_settings (default 0.65).
+VISION_AUTOFOLLOW_MAX_SPEED = float(os.getenv("VISION_AUTOFOLLOW_MAX_SPEED", "0.90"))
 # Zero by default: each stable track gets its own timeline event, including
 # multiple people entering the frame at nearly the same time.
 VISION_EVENT_COOLDOWN_SECONDS = float(os.getenv("VISION_EVENT_COOLDOWN_SECONDS", "0"))
