@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import os
 import re
 import secrets
 import threading
-import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -47,7 +45,7 @@ def _security_header(username: str, password: str) -> str:
     nonce64 = base64.b64encode(nonce).decode()
     return f"""
     <s:Header>
-      <wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+      <wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-open-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
         <wsse:UsernameToken>
           <wsse:Username>{escape(username)}</wsse:Username>
           <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{digest}</wsse:Password>
@@ -118,19 +116,45 @@ def session_for(rtsp_url: str) -> PTZSession:
 def probe(rtsp_url: str) -> dict:
     try:
         session = session_for(rtsp_url)
-        return {"ok": True, "profile_token": session.profile_token, "ptz_url": session.ptz_url}
+        return {
+            "ok": True,
+            "profile_token": session.profile_token,
+            "ptz_url": session.ptz_url,
+            "axis_mapping": "icsee_rotated",
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
+def logical_to_onvif(pan: float, tilt: float) -> tuple[float, float]:
+    """Map UI/world directions to the axis orientation used by these iCSee/XM cameras.
+
+    PersonOfInterest logical coordinates:
+      pan  +1 = right, -1 = left
+      tilt +1 = up,    -1 = down
+
+    The tested iCSee firmware exposes ONVIF PanTilt rotated by 90 degrees:
+      ONVIF x+ moves the camera down
+      ONVIF y+ moves the camera right
+
+    Therefore: device_x = -logical_tilt, device_y = logical_pan.
+    Keeping the transform here makes manual joystick and auto-follow consistent.
+    """
+    logical_pan = max(-1.0, min(1.0, float(pan)))
+    logical_tilt = max(-1.0, min(1.0, float(tilt)))
+    return -logical_tilt, logical_pan
+
+
 def move(rtsp_url: str, pan: float, tilt: float, speed: float = 0.55, duration: float = 0.35) -> None:
     session = session_for(rtsp_url)
-    pan = max(-1.0, min(1.0, float(pan))) * max(0.05, min(1.0, speed))
-    tilt = max(-1.0, min(1.0, float(tilt))) * max(0.05, min(1.0, speed))
+    device_pan, device_tilt = logical_to_onvif(pan, tilt)
+    speed = max(0.05, min(1.0, float(speed)))
+    device_pan *= speed
+    device_tilt *= speed
     body = f"""
 <tptz:ContinuousMove>
   <tptz:ProfileToken>{escape(session.profile_token)}</tptz:ProfileToken>
-  <tptz:Velocity><tt:PanTilt x="{pan:.4f}" y="{tilt:.4f}"/></tptz:Velocity>
+  <tptz:Velocity><tt:PanTilt x="{device_pan:.4f}" y="{device_tilt:.4f}"/></tptz:Velocity>
   <tptz:Timeout>PT{max(0.1, min(2.0, duration)):.2f}S</tptz:Timeout>
 </tptz:ContinuousMove>"""
     _post(session.ptz_url, "http://www.onvif.org/ver20/ptz/wsdl/ContinuousMove", body, session.username, session.password)
