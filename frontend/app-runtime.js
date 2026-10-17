@@ -123,6 +123,14 @@ function renderVisionOverlay(vision) {
   }));
 }
 
+function syncFollowSpeedControl(value) {
+  const slider = $('#followMaxSpeed');
+  if (!slider) return;
+  const percent = Math.round(Number(value || 0.65) * 100);
+  if (document.activeElement !== slider) slider.value = String(percent);
+  $('#followMaxSpeedValue').textContent = `${slider.value}%`;
+}
+
 async function pollVision() {
   const cameraId = state.viewer.cameraId;
   if (!cameraId || !$('#viewerDialog').open) return;
@@ -135,6 +143,7 @@ async function pollVision() {
     $('#autoFollowToggle').checked = Boolean(vision.auto_follow_enabled);
     if (vision.selected_track_id && !state.viewer.selectedTrackId) state.viewer.selectedTrackId = vision.selected_track_id;
     $('#homeStatus').textContent = vision.home_preset_set ? 'Home definido' : 'Home não definido';
+    syncFollowSpeedControl(vision.autofollow_max_speed);
     if (vision.auto_follow_enabled && vision.target_lost_seconds > 0) {
       $('#trackHint').textContent = vision.target_lost_seconds >= 3
         ? 'Alvo perdido: retornando à posição Home.'
@@ -161,6 +170,25 @@ async function setAutoFollow(enabled) {
   }
 }
 
+async function saveFollowMaxSpeed() {
+  const cameraId = state.viewer.cameraId;
+  if (!cameraId) return;
+  const slider = $('#followMaxSpeed');
+  const percent = Number(slider.value);
+  $('#followMaxSpeedValue').textContent = `${percent}%`;
+  try {
+    const result = await api(`/api/vision/cameras/${cameraId}/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify({ autofollow_max_speed: percent / 100 }),
+    });
+    syncFollowSpeedControl(result.autofollow_max_speed);
+    toast(`Velocidade máxima do auto-follow: ${Math.round(result.autofollow_max_speed * 100)}%.`);
+  } catch (error) {
+    toast(`Velocidade do auto-follow: ${error.message}`, 'error');
+    await pollVision();
+  }
+}
+
 async function checkPTZ(cameraId) {
   state.viewer.ptzReady = false;
   $('#ptzStatus').textContent = 'PTZ: verificando…';
@@ -170,12 +198,15 @@ async function checkPTZ(cameraId) {
     const protocol = result.protocol ? result.protocol.toUpperCase() : 'PTZ';
     $('#ptzStatus').textContent = result.ok ? `PTZ: ${protocol} pronto` : `PTZ: ${result.error || 'indisponível'}`;
     $('#homeStatus').textContent = result.home_preset_set ? 'Home definido' : 'Home não definido';
+    syncFollowSpeedControl(result.autofollow_max_speed);
     $('#ptzJoystick').classList.toggle('unavailable', !result.ok);
     $('#setHomeBtn').disabled = !result.ok;
     $('#gotoHomeBtn').disabled = !result.ok || !result.home_preset_set;
+    $('#followMaxSpeed').disabled = !result.ok;
   } catch (error) {
     $('#ptzStatus').textContent = `PTZ: ${error.message}`;
     $('#ptzJoystick').classList.add('unavailable');
+    $('#followMaxSpeed').disabled = true;
   }
 }
 
@@ -213,6 +244,7 @@ function openViewer(id) {
   $('#visionOverlay').innerHTML = '';
   $('#visionStatus').textContent = 'Visão: iniciando…';
   $('#autoFollowToggle').checked = false;
+  $('#followMaxSpeed').disabled = true;
   $('#viewerDialog').showModal();
   pollVision();
   clearInterval(state.viewer.pollTimer);
@@ -291,6 +323,8 @@ $('#viewerDialog').addEventListener('cancel', (event) => { event.preventDefault(
 $('#autoFollowToggle').addEventListener('change', (event) => setAutoFollow(event.target.checked));
 $('#setHomeBtn').addEventListener('click', setHomePosition);
 $('#gotoHomeBtn').addEventListener('click', gotoHomePosition);
+$('#followMaxSpeed').addEventListener('input', (event) => { $('#followMaxSpeedValue').textContent = `${event.target.value}%`; });
+$('#followMaxSpeed').addEventListener('change', saveFollowMaxSpeed);
 
 $('#ptzJoystick').addEventListener('pointerdown', async (event) => {
   if (!state.viewer.ptzReady) return;
