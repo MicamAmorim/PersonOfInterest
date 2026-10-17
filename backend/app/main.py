@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import go2rtc
-from .config import APP_NAME, APP_VERSION, DB_PATH, FRONTEND_DIR
+from .config import APP_NAME, APP_VERSION, DB_PATH, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
 from .models import CameraCreate, CameraOut, CameraUpdate
 
@@ -35,6 +35,7 @@ def mask_rtsp_url(raw: str) -> tuple[str, bool]:
 
 def camera_row_to_out(row: sqlite3.Row) -> CameraOut:
     safe_url, has_credentials = mask_rtsp_url(row["rtsp_url"])
+    viewer_base = "/__go2rtc_direct__" if GO2RTC_BROWSER_BASE == "direct" else GO2RTC_BROWSER_BASE
     return CameraOut(
         id=row["id"],
         name=row["name"],
@@ -47,7 +48,7 @@ def camera_row_to_out(row: sqlite3.Row) -> CameraOut:
         sync_error=row["sync_error"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        viewer_url=f"/go2rtc/stream.html?src={row['stream_name']}&mode=webrtc,mse,mp4,mjpeg",
+        viewer_url=f"{viewer_base}/stream.html?src={row['stream_name']}&mode=webrtc,mse,mp4,mjpeg",
     )
 
 
