@@ -6,3 +6,4 @@ onnxruntime>=1.19,<2
 websockets>=13,<18
 pywebpush>=2.0,<3
 cryptography>=43,<47
+tzdata>=2025.2,<2027
