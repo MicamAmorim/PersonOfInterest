@@ -73,8 +73,6 @@ def init_db() -> None:
                 ON events(camera_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_created
                 ON events(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_events_person_created
-                ON events(person_id, created_at DESC);
 
             CREATE TABLE IF NOT EXISTS camera_runtime_settings (
                 camera_id INTEGER PRIMARY KEY,
@@ -94,12 +92,21 @@ def init_db() -> None:
             );
             """
         )
+
+        # Existing installations created the events table before identity support
+        # existed. Add the new column first, then create any index that references
+        # it. Creating the index inside the executescript above would fail on an
+        # old database because CREATE TABLE IF NOT EXISTS does not alter schemas.
         _ensure_column(
             conn,
             "events",
             "person_id",
             "person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL",
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_person_created ON events(person_id, created_at DESC)"
+        )
+
         _ensure_column(
             conn,
             "camera_runtime_settings",
@@ -111,9 +118,6 @@ def init_db() -> None:
             "camera_runtime_settings",
             "autofollow_max_speed",
             "autofollow_max_speed REAL NOT NULL DEFAULT 0.65",
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_events_person_created ON events(person_id, created_at DESC)"
         )
         conn.execute(
             """
