@@ -29,21 +29,21 @@ Write-Host "Verificando dependencias da V3/V4..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-    & $PythonExe -c "import cv2,numpy,onnxruntime,websockets,pywebpush,cryptography,sys; ok=int(cv2.__version__.split('.')[0])<5 and hasattr(cv2,'FaceDetectorYN_create') and hasattr(cv2,'FaceRecognizerSF_create'); sys.exit(0 if ok else 2)" *> $null
+    & $PythonExe -c "import cv2,numpy,onnxruntime,websockets,pywebpush,cryptography,sys; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); ok=int(cv2.__version__.split('.')[0])<5 and hasattr(cv2,'FaceDetectorYN_create') and hasattr(cv2,'FaceRecognizerSF_create'); sys.exit(0 if ok else 2)" *> $null
     $depsExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $oldErrorActionPreference
 }
 
 if ($depsExitCode -ne 0) {
-    Write-Host "Ajustando dependencias de visao, identidade e Web Push..." -ForegroundColor Yellow
+    Write-Host "Ajustando dependencias de visao, identidade, fusos horarios e Web Push..." -ForegroundColor Yellow
     & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
         throw "Falha ao instalar as dependencias da V3/V4."
     }
 }
 
-& $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography; assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Web Push OK')"
+& $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Timezone DB OK | Web Push OK')"
 if ($LASTEXITCODE -ne 0) {
     throw "Dependencias da V3/V4 nao estao compativeis."
 }
