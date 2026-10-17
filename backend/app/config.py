@@ -15,5 +15,8 @@ GO2RTC_BROWSER_BASE = os.getenv("GO2RTC_BROWSER_BASE", "direct").rstrip("/")
 FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", str(PROJECT_ROOT / "frontend"))).resolve()
 VISION_PROCESS_FPS = float(os.getenv("VISION_PROCESS_FPS", "1.4"))
 VISION_MAX_WIDTH = int(os.getenv("VISION_MAX_WIDTH", "640"))
-VISION_EVENT_COOLDOWN_SECONDS = float(os.getenv("VISION_EVENT_COOLDOWN_SECONDS", "8"))
+# Zero by default: each stable track gets its own timeline event, including
+# multiple people entering the frame at nearly the same time. Set an override
+# only if a particular deployment prefers aggressive event rate limiting.
+VISION_EVENT_COOLDOWN_SECONDS = float(os.getenv("VISION_EVENT_COOLDOWN_SECONDS", "0"))
 PTZ_ONVIF_PORT = int(os.getenv("PTZ_ONVIF_PORT", "8899"))
