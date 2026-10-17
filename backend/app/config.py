@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -44,6 +44,16 @@ IDENTITY_KNOWN_THRESHOLD = float(os.getenv("IDENTITY_KNOWN_THRESHOLD", "0.48"))
 IDENTITY_CLUSTER_THRESHOLD = float(os.getenv("IDENTITY_CLUSTER_THRESHOLD", "0.46"))
 IDENTITY_POLL_SECONDS = float(os.getenv("IDENTITY_POLL_SECONDS", "1.0"))
 IDENTITY_BATCH_SIZE = int(os.getenv("IDENTITY_BATCH_SIZE", "6"))
+
+# Appearance ReID. Body evidence is *never* promoted to an absolute identity.
+# It only fills probable_person_id and is visually labelled as "Provável".
+BODY_REID_MODEL_PATH = Path(
+    os.getenv("BODY_REID_MODEL_PATH", str(MODELS_DIR / "osnet_x0_25_msmt17.onnx"))
+).resolve()
+BODY_REID_THRESHOLD = float(os.getenv("BODY_REID_THRESHOLD", "0.72"))
+BODY_REID_MARGIN = float(os.getenv("BODY_REID_MARGIN", "0.045"))
+BODY_REID_FACE_BONUS = float(os.getenv("BODY_REID_FACE_BONUS", "0.035"))
+BODY_REID_POLL_SECONDS = float(os.getenv("BODY_REID_POLL_SECONDS", "0.8"))
 
 # V4 alerts / Web Push.
 VAPID_PRIVATE_KEY_PATH = Path(
