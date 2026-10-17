@@ -100,7 +100,17 @@
   <dialog id="viewerDialog" class="viewer-modal">
     <div class="viewer-header">
       <div><p class="eyebrow">AO VIVO · V2</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div>
-      <div class="viewer-actions"><button class="button ghost small" id="setHomeBtn" type="button">⌂ Definir Home</button><button class="button ghost small" id="gotoHomeBtn" type="button" disabled>Ir para Home</button><label class="follow-toggle"><input id="autoFollowToggle" type="checkbox" /><span>Acompanhar pessoa</span></label><button class="icon-button" type="button" data-viewer-close>×</button></div>
+      <div class="viewer-actions">
+        <button class="button ghost small" id="setHomeBtn" type="button">⌂ Definir Home</button>
+        <button class="button ghost small" id="gotoHomeBtn" type="button" disabled>Ir para Home</button>
+        <label class="follow-speed" title="Teto de velocidade do servomotor durante o auto-follow">
+          <span>Vel. máx.</span>
+          <input id="followMaxSpeed" type="range" min="20" max="90" step="5" value="65" />
+          <output id="followMaxSpeedValue">65%</output>
+        </label>
+        <label class="follow-toggle"><input id="autoFollowToggle" type="checkbox" /><span>Acompanhar pessoa</span></label>
+        <button class="icon-button" type="button" data-viewer-close>×</button>
+      </div>
     </div>
     <div class="viewer-frame-wrap" id="viewerStage">
       <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>
