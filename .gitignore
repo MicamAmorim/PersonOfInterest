@@ -5,6 +5,10 @@ __pycache__/
 .venv/
 venv/
 
+# Local binaries
+bin/*
+!bin/.gitkeep
+
 # Local data / secrets
 .env
 data/*
