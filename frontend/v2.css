@@ -51,7 +51,9 @@
 .event-meta div { display:grid; gap:2px; }
 .event-meta span { color:var(--muted); font-size:10px; }
 .event-meta .status-pill.identified { color:#bdf7d9; border-color:rgba(92,225,162,.32); background:rgba(29,96,70,.18); }
-.event-foot { display:flex; justify-content:space-between; gap:8px; padding:5px 12px 12px; color:var(--muted); font-size:10px; }
+.event-foot { display:flex; justify-content:space-between; gap:8px; padding:5px 12px 7px; color:var(--muted); font-size:10px; }
+.event-actions { display:flex; justify-content:flex-end; padding:0 12px 11px; }
+.button.tiny { padding:5px 8px; min-height:0; font-size:9px; border-radius:8px; }
 .empty-state.compact { min-height:220px; grid-column:1/-1; }
 @media (max-width:1280px) { .timeline-filter-panel { grid-template-columns:repeat(4,minmax(130px,1fr)); } }
 @media (max-width:980px) { .timeline-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .timeline-filter-panel { grid-template-columns:repeat(2,minmax(0,1fr)); } }
