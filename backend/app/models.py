@@ -100,6 +100,10 @@ class VisionFollowRequest(BaseModel):
     track_id: int | None = Field(default=None, ge=1)
 
 
+class VisionSettingsUpdate(BaseModel):
+    autofollow_max_speed: float = Field(ge=0.20, le=0.90)
+
+
 class PTZMoveRequest(BaseModel):
     pan: float = Field(ge=-1.0, le=1.0)
     tilt: float = Field(ge=-1.0, le=1.0)
