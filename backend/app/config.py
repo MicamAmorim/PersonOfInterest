@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.4"
+APP_VERSION = "0.4.5"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -74,8 +74,9 @@ ASSISTANT_POLL_SECONDS = float(os.getenv("ASSISTANT_POLL_SECONDS", "1.0"))
 ASSISTANT_SETTLE_SECONDS = float(os.getenv("ASSISTANT_SETTLE_SECONDS", "12.0"))
 ASSISTANT_UNKNOWN_FACE_QUALITY = float(os.getenv("ASSISTANT_UNKNOWN_FACE_QUALITY", "0.72"))
 
-# V4.4 local voice activation. Audio is read from the local go2rtc restream and
-# transcribed locally with faster-whisper; only TTS continues to use Edge.
+# V4.4/V4.5 local voice activation and short deterministic conversation.
+# Audio is read from the local go2rtc restream and transcribed locally with
+# faster-whisper; only TTS continues to use Edge.
 WAKE_PHRASE = os.getenv("WAKE_PHRASE", "Oi, Tonho!")
 WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "tiny")
 WAKE_CHUNK_SECONDS = float(os.getenv("WAKE_CHUNK_SECONDS", "4.0"))
@@ -84,6 +85,7 @@ WAKE_MIN_RMS = float(os.getenv("WAKE_MIN_RMS", "0.004"))
 WAKE_RESPONSE_COOLDOWN_SECONDS = float(os.getenv("WAKE_RESPONSE_COOLDOWN_SECONDS", "6.0"))
 WAKE_CONTEXT_SECONDS = float(os.getenv("WAKE_CONTEXT_SECONDS", "20.0"))
 WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "6.0"))
+WAKE_CONVERSATION_SECONDS = float(os.getenv("WAKE_CONVERSATION_SECONDS", "8.0"))
 
 # V4 alerts / Web Push.
 VAPID_PRIVATE_KEY_PATH = Path(
