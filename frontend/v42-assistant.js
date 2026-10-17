@@ -17,9 +17,15 @@
     panel.id = 'assistantPanel';
     panel.className = 'panel info-panel';
     panel.innerHTML = `
-      <p class="eyebrow">V4.2 · VOZ NA CÂMERA</p>
+      <p class="eyebrow">V4.3 · VOZ NA CÂMERA</p>
       <h2>Assistente</h2>
       <p class="muted paragraph">Cumprimenta pessoas usando a identidade local. Face/manual é confirmação; corpo continua sempre <strong>provável</strong> e o nome é falado como pergunta.</p>
+
+      <div class="assistant-active-block">
+        <div class="assistant-active-heading"><strong>Assistentes ativos</strong><span id="assistantActiveCount" class="muted">0</span></div>
+        <div id="assistantActiveList" class="assistant-active-list"><p class="muted">Carregando…</p></div>
+      </div>
+
       <div class="alert-form assistant-form">
         <label>Câmera
           <select id="assistantCamera"></select>
@@ -72,6 +78,35 @@
     if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
   }
 
+  function renderActiveAssistants() {
+    const list = document.getElementById('assistantActiveList');
+    const count = document.getElementById('assistantActiveCount');
+    if (!list || !count) return;
+    const active = (state.assistantSettings || []).filter(item => Boolean(item.enabled));
+    count.textContent = active.length === 1 ? '1 ativo' : `${active.length} ativos`;
+    if (!active.length) {
+      list.innerHTML = '<p class="muted">Nenhum assistente está ligado.</p>';
+      return;
+    }
+    list.innerHTML = active.map(item => {
+      const voice = item.voice_gender === 'male' ? 'Antonio · masculina' : 'Francisca · feminina';
+      const interval = Number(item.interval_minutes || 30);
+      return `<div class="assistant-active-row" data-assistant-active-camera="${item.camera_id}">
+        <div><strong>${escapeHtml(item.camera_name || `Câmera ${item.camera_id}`)}</strong><span>${escapeHtml(voice)} · ${interval} min · ${escapeHtml(item.timezone || 'UTC')}</span></div>
+        <button class="button ghost small" type="button">Configurar</button>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('[data-assistant-active-camera]').forEach(row => {
+      row.addEventListener('click', () => {
+        const select = document.getElementById('assistantCamera');
+        if (!select) return;
+        select.value = String(row.dataset.assistantActiveCamera || '');
+        renderSelectedAssistant();
+        document.getElementById('assistantEnabled')?.focus();
+      });
+    });
+  }
+
   function renderSelectedAssistant() {
     const setting = selectedSetting();
     const enabled = document.getElementById('assistantEnabled');
@@ -112,6 +147,7 @@
       state.assistantSettings = settings || [];
       state.assistantStatus = status || null;
       populateCameras();
+      renderActiveAssistants();
       renderSelectedAssistant();
     } catch (error) {
       if (statusEl) statusEl.textContent = `Assistente indisponível: ${error.message}`;
@@ -140,6 +176,7 @@
       const index = state.assistantSettings.findIndex(item => Number(item.camera_id) === cameraId);
       if (index >= 0) state.assistantSettings[index] = saved;
       else state.assistantSettings.push(saved);
+      renderActiveAssistants();
       renderSelectedAssistant();
       if (!quiet) toast(saved.enabled ? 'Assistente ligado e configurações salvas.' : 'Assistente desligado e configurações salvas.');
       return true;
