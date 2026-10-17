@@ -1,6 +1,6 @@
 # PersonOfInterest
 
-Local-first IP camera dashboard. The V1 establishes the NVR foundation: RTSP camera registration, persistent SQLite configuration, go2rtc streaming, a responsive installable PWA and a Docker Compose deployment ready for LAN/Tailscale access.
+Local-first IP camera dashboard. V1 establishes the NVR foundation: RTSP camera registration, persistent SQLite configuration, go2rtc streaming and a responsive installable PWA. **Windows native is the primary development path; Docker is optional.**
 
 > Facial recognition, identity clustering, event history and push notifications are deliberately left for later versions. V1 builds the stable camera/streaming base first.
 
@@ -13,39 +13,52 @@ Local-first IP camera dashboard. The V1 establishes the NVR foundation: RTSP cam
 - go2rtc stream synchronization
 - WebRTC playback with MSE/MP4/MJPEG fallbacks
 - Responsive PWA for desktop and mobile
-- Caddy same-origin gateway
-- Docker Compose startup
+- Native Windows setup/start scripts
+- Docker Compose remains available as an optional deployment
 - Backend/database/go2rtc health status
 
-## Start locally
+## Quick start — Windows, no Docker
 
-Requirements: Docker Desktop (Windows/macOS) or Docker Engine + Docker Compose (Linux).
+Requirement: **Python 3.11+** on Windows 10/11.
 
-```bash
+```powershell
 git clone https://github.com/MicamAmorim/PersonOfInterest.git
 cd PersonOfInterest
-docker compose up -d --build
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+powershell -ExecutionPolicy Bypass -File .\start.ps1
 ```
 
-Open:
+`setup.ps1` creates `.venv`, installs the Python dependencies and downloads the official 64-bit Windows build of go2rtc into `bin/`. The go2rtc project publishes `go2rtc_win64.zip` for Windows 10+ 64-bit.
+
+After startup the browser opens automatically at:
 
 ```text
 http://localhost:8080
 ```
 
-Logs:
+To start later, only run:
 
-```bash
-docker compose logs -f
+```powershell
+.\start.ps1
 ```
 
-Stop:
+To start without opening the browser:
 
-```bash
-docker compose down
+```powershell
+.\start.ps1 -NoBrowser
 ```
 
-The database is persisted at `data/person_of_interest.db` and is ignored by Git.
+Press **Ctrl+C** in the PowerShell window to stop the backend and go2rtc.
+
+The SQLite database is stored at `data/person_of_interest.db` and is ignored by Git.
+
+### PowerShell execution policy
+
+If Windows blocks local scripts, either use the `powershell -ExecutionPolicy Bypass -File ...` commands above or, for the current terminal only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+```
 
 ## Add a camera
 
@@ -57,11 +70,7 @@ rtsp://user:password@192.168.1.50:554/stream1
 
 The RTSP path varies by manufacturer and model. After saving, PersonOfInterest never returns the original credentials through its API; the UI only sees a masked form such as `rtsp://***:***@192.168.1.50:554/stream1`.
 
-If playback fails, verify camera reachability, RTSP enablement, credentials and path, then inspect:
-
-```bash
-docker compose logs go2rtc
-```
+In native mode go2rtc listens on `1984/TCP` and WebRTC uses `8555/TCP+UDP`. The backend/PWA listens on `8080/TCP`.
 
 ## Architecture
 
@@ -71,41 +80,47 @@ IP cameras (RTSP)
         v
      go2rtc <----- FastAPI ----- SQLite
         |              |
-        v              |
-      Caddy  <----------+
-        |
-        v
- Browser / PWA
+        |              v
+        +--------> Browser / PWA
+                    :8080
 ```
 
-The go2rtc HTTP API is not published directly. The browser reaches its player through Caddy at `/go2rtc/`. WebRTC media ports `8555/tcp` and `8555/udp` are published; the player can fall back to browser-friendly streaming through the gateway.
+The browser loads the PersonOfInterest UI from FastAPI on port `8080`; camera playback is served by the local go2rtc process on port `1984`.
+
+## Optional Docker mode
+
+Docker is not required. It remains available for reproducible deployments:
+
+```powershell
+docker compose up -d --build
+```
+
+Then open `http://localhost:8080`. Docker mode uses Caddy as a same-origin proxy and keeps go2rtc internal except for WebRTC media ports.
 
 ## Tailscale
 
-This project is intended to stay on a trusted LAN/tailnet. Do not port-forward it directly to the public internet. For remote access, point **Tailscale Serve** to the local app at `http://127.0.0.1:8080`. Check the syntax supported by your installed Tailscale version with:
-
-```bash
-tailscale serve --help
-```
-
-HTTPS is recommended when installing the PWA on other devices.
+The intended remote-access model is a trusted LAN/tailnet, not public port-forwarding. Native LAN access works by using the machine's IP instead of `localhost`. Before treating remote PWA access as production-ready, the native mode will gain the same-origin HTTPS proxy used for Tailscale/Web Push; that is intentionally separate from this first local V1 test.
 
 ## Project layout
 
 ```text
-backend/            FastAPI + SQLite + go2rtc integration
-frontend/           installable responsive PWA
-infra/go2rtc/       go2rtc configuration
-Caddyfile            same-origin gateway
-docker-compose.yml   local stack
-tests/               backend unit tests
+backend/             FastAPI + SQLite + go2rtc integration
+frontend/            installable responsive PWA
+infra/go2rtc/        go2rtc configuration
+bin/                 local go2rtc executable (ignored by Git)
+data/                local SQLite data (ignored by Git)
+setup.ps1             one-time Windows bootstrap
+start.ps1             native Windows launcher
+Caddyfile             Docker same-origin gateway
+docker-compose.yml    optional container stack
+tests/                backend unit tests
 ```
 
 ## Validation
 
-```bash
-python -m compileall backend/app
-python -m unittest discover -s tests -v
+```powershell
+.\.venv\Scripts\python.exe -m compileall backend\app
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 ## Roadmap
