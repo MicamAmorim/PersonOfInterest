@@ -21,20 +21,18 @@
       <nav>
         <button class="nav-item active" data-view="dashboard"><span>▦</span> Visão geral</button>
         <button class="nav-item" data-view="cameras"><span>◉</span> Câmeras</button>
+        <button class="nav-item" data-view="timeline"><span>◷</span> Timeline</button>
         <button class="nav-item" data-view="settings"><span>⚙</span> Sistema</button>
       </nav>
       <div class="sidebar-status">
         <span class="status-dot" id="systemDot"></span>
-        <div><strong id="systemStatus">Verificando…</strong><span id="systemDetail">backend / go2rtc</span></div>
+        <div><strong id="systemStatus">Verificando…</strong><span id="systemDetail">backend / go2rtc / vision</span></div>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">NVR LOCAL · V1</p>
-          <h1 id="pageTitle">Visão geral</h1>
-        </div>
+        <div><p class="eyebrow">NVR LOCAL · V2</p><h1 id="pageTitle">Visão geral</h1></div>
         <div class="top-actions">
           <button class="button ghost" id="refreshBtn">↻ Atualizar</button>
           <button class="button ghost" id="discoverBtn">⌁ Descobrir câmeras</button>
@@ -47,17 +45,13 @@
           <article class="stat-card"><span>Câmeras</span><strong id="cameraCount">0</strong><small>cadastradas</small></article>
           <article class="stat-card"><span>Ativas</span><strong id="activeCount">0</strong><small>habilitadas</small></article>
           <article class="stat-card"><span>Streams</span><strong id="syncedCount">0</strong><small>sincronizados</small></article>
-          <article class="stat-card"><span>Reconhecimento</span><strong>—</strong><small>planejado para V2/V3</small></article>
+          <article class="stat-card"><span>Eventos</span><strong id="eventCount">0</strong><small>na timeline recente</small></article>
         </div>
-        <div class="section-heading">
-          <div><p class="eyebrow">AO VIVO</p><h2>Câmeras</h2></div>
-          <span class="muted">Clique em uma câmera para ampliar</span>
-        </div>
+        <div class="section-heading"><div><p class="eyebrow">AO VIVO</p><h2>Câmeras</h2></div><span class="muted">Clique em uma câmera para ampliar</span></div>
         <div id="cameraGrid" class="camera-grid"></div>
         <div id="emptyState" class="empty-state hidden">
-          <div class="empty-icon">◉</div>
-          <h3>Nenhuma câmera cadastrada</h3>
-          <p>Adicione a primeira URL RTSP. As credenciais ficam somente no banco local.</p>
+          <div class="empty-icon">◉</div><h3>Nenhuma câmera cadastrada</h3>
+          <p>Descubra câmeras RTSP/ONVIF na rede ou adicione uma URL manualmente.</p>
           <div class="empty-actions"><button class="button ghost" id="emptyDiscoverBtn">Descobrir na rede</button><button class="button primary" id="emptyAddBtn">Adicionar manualmente</button></div>
         </div>
       </section>
@@ -65,12 +59,17 @@
       <section id="camerasView" class="view">
         <div class="panel">
           <div class="panel-header"><div><p class="eyebrow">GERENCIAMENTO</p><h2>Câmeras cadastradas</h2></div></div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Nome</th><th>Local</th><th>RTSP</th><th>Status</th><th></th></tr></thead>
-              <tbody id="cameraTableBody"></tbody>
-            </table>
+          <div class="table-wrap"><table><thead><tr><th>Nome</th><th>Local</th><th>RTSP</th><th>Status</th><th></th></tr></thead><tbody id="cameraTableBody"></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="timelineView" class="view">
+        <div class="panel timeline-panel">
+          <div class="panel-header timeline-header">
+            <div><p class="eyebrow">VISÃO COMPUTACIONAL</p><h2>Timeline de pessoas</h2></div>
+            <div class="timeline-filters"><select id="timelineCamera"><option value="">Todas as câmeras</option></select><button class="button ghost small" id="timelineRefresh">↻ Atualizar</button></div>
           </div>
+          <div id="timelineGrid" class="timeline-grid"><p class="muted">Carregando eventos…</p></div>
         </div>
       </section>
 
@@ -80,12 +79,12 @@
             <p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2>
             <div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div>
             <div class="info-row"><span>Streaming</span><strong>go2rtc</strong></div>
-            <div class="info-row"><span>Gateway</span><strong>Nativo / Caddy opcional</strong></div>
-            <div class="info-row"><span>Cliente</span><strong>PWA</strong></div>
+            <div class="info-row"><span>Visão</span><strong>OpenCV local</strong></div>
+            <div class="info-row"><span>PTZ</span><strong>ONVIF local</strong></div>
           </article>
           <article class="panel info-panel">
-            <p class="eyebrow">SEGURANÇA</p><h2>Acesso</h2>
-            <p class="muted paragraph">Esta V1 foi feita para rede local ou tailnet. Não exponha a porta do sistema diretamente à internet. Para acesso externo, prefira Tailscale Serve.</p>
+            <p class="eyebrow">V2</p><h2>Detecção e tracking</h2>
+            <p class="muted paragraph">Detecção de pessoas e faces, IDs de tracking por câmera, snapshots de eventos e auto-follow PTZ opcional. O reconhecimento de identidade por embeddings continua reservado para a V3.</p>
             <button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button>
           </article>
         </div>
@@ -101,7 +100,7 @@
       <label>Local<input id="cameraLocation" maxlength="120" placeholder="Ex.: Entrada principal" /></label>
       <label>URL RTSP<input id="cameraRtsp" type="text" autocomplete="off" spellcheck="false" placeholder="rtsp://usuario:senha@192.168.1.50:554/stream" /></label>
       <p class="field-help" id="rtspHelp">A URL será armazenada apenas no SQLite local e enviada internamente ao go2rtc.</p>
-      <label class="switch-row"><span><strong>Câmera habilitada</strong><small>Sincronizar e exibir o stream</small></span><input id="cameraEnabled" type="checkbox" checked /></label>
+      <label class="switch-row"><span><strong>Câmera habilitada</strong><small>Streaming e visão computacional</small></span><input id="cameraEnabled" type="checkbox" checked /></label>
       <div id="formError" class="form-error hidden"></div>
       <div class="modal-actions"><button type="button" class="button ghost" data-close>Cancelar</button><button type="submit" class="button primary" id="saveCameraBtn">Salvar câmera</button></div>
     </form>
@@ -109,10 +108,7 @@
 
   <dialog id="discoveryDialog" class="modal discovery-modal">
     <div class="discovery-shell">
-      <div class="modal-header">
-        <div><p class="eyebrow">REDE LOCAL</p><h2>Descobrir câmeras</h2><span id="discoverySubtitle" class="muted">Procurando RTSP e ONVIF na rede local</span></div>
-        <button class="icon-button" type="button" data-discovery-close>×</button>
-      </div>
+      <div class="modal-header"><div><p class="eyebrow">REDE LOCAL</p><h2>Descobrir câmeras</h2><span id="discoverySubtitle" class="muted">Procurando RTSP e ONVIF na rede local</span></div><button class="icon-button" type="button" data-discovery-close>×</button></div>
       <div id="discoveryStatus" class="discovery-status">Pronto para escanear.</div>
       <div id="discoveryList" class="discovery-list"></div>
       <section id="discoverySetup" class="discovery-setup hidden">
@@ -120,20 +116,25 @@
         <label>Usuário<input id="discoveryUsername" type="text" autocomplete="username" placeholder="Ex.: admin" /></label>
         <label>Senha<input id="discoveryPassword" type="password" autocomplete="current-password" placeholder="Senha do dispositivo" /></label>
         <label>Nome da câmera <span class="optional">opcional</span><input id="discoveryName" type="text" maxlength="80" placeholder="Ex.: Portão" /></label>
-        <p class="field-help">O PersonOfInterest testa o RTSP antes de salvar. As credenciais não são exibidas novamente pela API.</p>
+        <p class="field-help">O PersonOfInterest testa o RTSP antes de salvar.</p>
         <div id="discoveryProbeResult" class="probe-result hidden"></div>
-        <div class="modal-actions">
-          <button type="button" class="button ghost" id="testDiscoveryBtn">Testar acesso </button>
-          <button type="button" class="button primary" id="saveDiscoveryBtn" disabled>Adicionar câmera</button>
-        </div>
+        <div class="modal-actions"><button type="button" class="button ghost" id="testDiscoveryBtn">Testar acesso</button><button type="button" class="button primary" id="saveDiscoveryBtn" disabled>Adicionar câmera</button></div>
       </section>
     </div>
   </dialog>
 
-
   <dialog id="viewerDialog" class="viewer-modal">
-    <div class="viewer-header"><div><p class="eyebrow">AO VIVO</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div><button class="icon-button" type="button" data-viewer-close>×</button></div>
-    <div class="viewer-frame-wrap"><iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe></div>
+    <div class="viewer-header">
+      <div><p class="eyebrow">AO VIVO · V2</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div>
+      <div class="viewer-actions"><label class="follow-toggle"><input id="autoFollowToggle" type="checkbox" /><span>Acompanhar pessoa</span></label><button class="icon-button" type="button" data-viewer-close>×</button></div>
+    </div>
+    <div class="viewer-frame-wrap" id="viewerStage">
+      <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>
+      <div id="visionOverlay" class="vision-overlay"></div>
+      <div id="visionStatus" class="vision-status">Visão: iniciando…</div>
+      <div id="ptzJoystick" class="ptz-joystick" title="Arraste para mover a câmera"><div class="ptz-ring"><div id="ptzKnob" class="ptz-knob"></div></div></div>
+    </div>
+    <div class="viewer-footer"><span id="trackHint" class="muted">Clique numa caixa de pessoa para selecioná-la para acompanhamento.</span><span id="ptzStatus" class="muted">PTZ: verificando…</span></div>
   </dialog>
 
   <div id="toast" class="toast"></div>
