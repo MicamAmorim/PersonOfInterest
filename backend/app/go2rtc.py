@@ -34,13 +34,26 @@ def health() -> Go2RTCResult:
         return Go2RTCResult(ok=False, error=str(exc))
 
 
+def _stream_exists(stream_name: str) -> bool:
+    try:
+        raw = _request("GET", "/api/streams", {"src": stream_name}, timeout=2.0)
+        payload = json.loads(raw or b"{}")
+        return isinstance(payload, dict)
+    except Exception:
+        return False
+
+
 def upsert_stream(stream_name: str, rtsp_url: str) -> Go2RTCResult:
     try:
-        # PUT persists the stream in go2rtc's config and updates the running process.
         _request("PUT", "/api/streams", {"name": stream_name, "src": rtsp_url})
         return Go2RTCResult(ok=True)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip() or str(exc)
+        # go2rtc creates/updates the in-memory stream before trying to patch its YAML.
+        # PersonOfInterest persists camera configuration in SQLite, so a YAML-patch
+        # failure is harmless as long as the runtime stream actually exists.
+        if _stream_exists(stream_name):
+            return Go2RTCResult(ok=True)
         return Go2RTCResult(ok=False, error=detail)
     except Exception as exc:
         return Go2RTCResult(ok=False, error=str(exc))
@@ -52,6 +65,9 @@ def delete_stream(stream_name: str) -> Go2RTCResult:
         return Go2RTCResult(ok=True)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip() or str(exc)
+        # If it is already gone from runtime, consider deletion successful.
+        if not _stream_exists(stream_name):
+            return Go2RTCResult(ok=True)
         return Go2RTCResult(ok=False, error=detail)
     except Exception as exc:
         return Go2RTCResult(ok=False, error=str(exc))
