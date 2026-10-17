@@ -135,6 +135,7 @@ class BodyIdentityManager:
         self._session: Any | None = None
         self._input_name = ""
         self._nchw = True
+        self._batch_size = 1
 
     @property
     def available(self) -> bool:
@@ -170,6 +171,11 @@ class BodyIdentityManager:
         self._input_name = input_meta.name
         shape = list(input_meta.shape)
         self._nchw = not (len(shape) == 4 and shape[-1] == 3)
+        # Some exported OSNet models have a fixed batch dimension (for example
+        # 16). We still process one event at a time, but repeat the same crop to
+        # satisfy the model shape and keep only the first embedding.
+        first_dim = shape[0] if shape else 1
+        self._batch_size = int(first_dim) if isinstance(first_dim, int) and first_dim > 0 else 1
 
     def _run(self) -> None:  # pragma: no cover - background integration
         self.status = "starting"
@@ -191,7 +197,6 @@ class BodyIdentityManager:
                 self.error = None
                 delay = 0.15 if processed else max(0.35, BODY_REID_POLL_SECONDS)
             except sqlite3.OperationalError:
-                # Startup can briefly race the DB migration on old installs.
                 delay = 0.8
             except Exception as exc:
                 self.status = "error"
@@ -265,8 +270,11 @@ class BodyIdentityManager:
             tensor = np.transpose(image, (2, 0, 1))[None, ...]
         else:
             tensor = image[None, ...]
-        output = self._session.run(None, {self._input_name: tensor})[0]
-        return _normalize(output)
+        if self._batch_size > 1:
+            tensor = np.repeat(tensor, self._batch_size, axis=0)
+        output = np.asarray(self._session.run(None, {self._input_name: tensor})[0])
+        vector = output[0] if output.ndim >= 2 and output.shape[0] == self._batch_size else output
+        return _normalize(vector)
 
     def _event_embedding(self, event: dict[str, Any]) -> tuple[Any, float] | None:
         loaded = self._load_event_crop(event)
@@ -444,9 +452,14 @@ class BodyIdentityManager:
                 embedding = _blob_to_vector(sample["embedding"])
                 quality = float(sample["quality"] or 0.0)
         if embedding is None:
-            embedded = self._event_embedding(dict(event))
-            if embedded is not None:
-                embedding, quality = embedded
+            # Hard-negative extraction is useful, but a model/runtime failure
+            # must never veto the user's explicit false-positive decision.
+            try:
+                embedded = self._event_embedding(dict(event))
+                if embedded is not None:
+                    embedding, quality = embedded
+            except Exception as exc:
+                self.error = f"Hard-negative não extraído: {exc}"
         with connection() as conn:
             if embedding is not None and camera_id is not None:
                 conn.execute(
