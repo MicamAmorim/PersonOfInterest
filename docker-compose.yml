@@ -7,6 +7,7 @@ services:
     environment:
       DATA_DIR: /app/data
       GO2RTC_API_URL: ${GO2RTC_API_URL:-http://go2rtc:1984}
+      GO2RTC_BROWSER_BASE: /go2rtc
       TZ: ${TZ:-America/Bahia}
     volumes:
       - ./data:/app/data
