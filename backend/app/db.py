@@ -68,6 +68,7 @@ def init_db() -> None:
                 auto_follow_enabled INTEGER NOT NULL DEFAULT 0,
                 selected_track_id INTEGER,
                 home_preset_set INTEGER NOT NULL DEFAULT 0,
+                autofollow_max_speed REAL NOT NULL DEFAULT 0.65,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
             );
@@ -84,6 +85,12 @@ def init_db() -> None:
             "camera_runtime_settings",
             "home_preset_set",
             "home_preset_set INTEGER NOT NULL DEFAULT 0",
+        )
+        _ensure_column(
+            conn,
+            "camera_runtime_settings",
+            "autofollow_max_speed",
+            "autofollow_max_speed REAL NOT NULL DEFAULT 0.65",
         )
         conn.execute(
             """
