@@ -130,11 +130,35 @@ function renderTimeline() {
     const date = new Date(event.created_at);
     const when = Number.isNaN(date.getTime()) ? event.created_at : date.toLocaleString('pt-BR');
     return `<article class="event-card">
-      <div class="event-image">${event.snapshot_url ? `<img src="${event.snapshot_url}" loading="lazy" alt="Evento da câmera ${escapeHtml(event.camera_name)}">` : '<div class="event-placeholder">Sem imagem</div>'}</div>
+      <div class="event-image">${event.snapshot_url ? `<img src="${event.snapshot_url}" loading="lazy" alt="Evento da câmera ${escapeHtml(event.camera_name)}">` : '<div class="event-placeholder">Sem imagem</div>'}<button class="event-delete" data-delete-event="${event.id}" title="Excluir este evento">×</button></div>
       <div class="event-meta"><div><strong>${escapeHtml(event.camera_name)}</strong><span>${escapeHtml(event.camera_location || 'Sem local')}</span></div><span class="status-pill">Pessoa #${event.track_id ?? '—'}</span></div>
       <div class="event-foot"><span>${when}</span><span>${event.has_face ? `Face detectada${event.face_count > 1 ? ` (${event.face_count})` : ''}` : 'Sem face útil'}</span></div>
     </article>`;
   }).join('');
+  $$('[data-delete-event]').forEach(el => el.addEventListener('click', () => deleteTimelineEvent(Number(el.dataset.deleteEvent))));
+}
+
+async function deleteTimelineEvent(id) {
+  if (!confirm('Excluir este evento e o snapshot salvo?')) return;
+  try {
+    await api(`/api/events/${id}`, { method: 'DELETE' });
+    state.events = state.events.filter(event => event.id !== id);
+    if ($('#eventCount')) $('#eventCount').textContent = state.events.length;
+    renderTimeline();
+    toast('Evento excluído.');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function deleteAllTimelineEvents() {
+  const cameraId = $('#timelineCamera')?.value || '';
+  const scope = cameraId ? 'todos os eventos desta câmera' : 'TODOS os eventos da Timeline';
+  if (!confirm(`Excluir ${scope} e seus snapshots? Esta ação não pode ser desfeita.`)) return;
+  try {
+    const suffix = cameraId ? `?camera_id=${encodeURIComponent(cameraId)}` : '';
+    await api(`/api/events${suffix}`, { method: 'DELETE' });
+    await loadEvents();
+    toast(cameraId ? 'Eventos desta câmera excluídos.' : 'Timeline limpa.');
+  } catch (error) { toast(error.message, 'error'); }
 }
 
 function setView(view) {
