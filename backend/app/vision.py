@@ -9,8 +9,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import ptz
-from .config import EVENTS_DIR, VISION_EVENT_COOLDOWN_SECONDS, VISION_MAX_WIDTH, VISION_PROCESS_FPS
+from .config import (
+    EVENTS_DIR,
+    VISION_EVENT_COOLDOWN_SECONDS,
+    VISION_MAX_WIDTH,
+    VISION_MODEL_PATH,
+    VISION_NMS_THRESHOLD,
+    VISION_PERSON_CONFIDENCE,
+    VISION_PROCESS_FPS,
+)
 from .db import connection, utc_now
+from .yolox_detector import YoloXPersonDetector
 
 try:
     import cv2  # type: ignore
@@ -139,8 +148,17 @@ class CameraVisionWorker(threading.Thread):
             self.error = CV_IMPORT_ERROR
             return
 
-        hog = cv2.HOGDescriptor()
-        hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+        try:
+            detector = YoloXPersonDetector(
+                VISION_MODEL_PATH,
+                confidence=VISION_PERSON_CONFIDENCE,
+                nms_threshold=VISION_NMS_THRESHOLD,
+            )
+        except Exception as exc:
+            self.status = "error"
+            self.error = f"Falha ao carregar YOLOX ONNX: {exc}"
+            return
+
         face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
@@ -167,14 +185,14 @@ class CameraVisionWorker(threading.Thread):
                     if now - last_processed < target_interval:
                         continue
                     last_processed = now
-                    self._process(frame, hog, face_cascade)
+                    self._process(frame, detector, face_cascade)
             finally:
                 cap.release()
 
             if not self.stop_event.is_set():
                 time.sleep(1.0)
 
-    def _process(self, frame: Any, hog: Any, face_cascade: Any) -> None:
+    def _process(self, frame: Any, detector: YoloXPersonDetector, face_cascade: Any) -> None:
         h0, w0 = frame.shape[:2]
         if w0 > VISION_MAX_WIDTH:
             scale = VISION_MAX_WIDTH / float(w0)
@@ -183,21 +201,7 @@ class CameraVisionWorker(threading.Thread):
         height, width = frame.shape[:2]
         self.frame_size = (width, height)
 
-        rects, weights = hog.detectMultiScale(
-            frame,
-            winStride=(8, 8),
-            padding=(8, 8),
-            scale=1.05,
-        )
-        boxes = [[int(x), int(y), int(w), int(h)] for x, y, w, h in rects]
-        scores = [float(v) for v in weights]
-        keep = cv2.dnn.NMSBoxes(boxes, scores, 0.25, 0.38) if boxes else []
-
-        detections: list[tuple[tuple[int, int, int, int], float]] = []
-        for idx in list(keep):
-            i = int(idx)
-            detections.append((tuple(boxes[i]), scores[i]))
-
+        detections = detector.detect(frame)
         tracks = self.tracker.update(detections, frame.shape)
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -358,6 +362,7 @@ class CameraVisionWorker(threading.Thread):
             "camera_id": self.camera_id,
             "status": self.status,
             "error": self.error,
+            "detector": "yolox_tiny_onnx",
             "frame_width": self.frame_size[0],
             "frame_height": self.frame_size[1],
             "tracks": self.tracks_state,
