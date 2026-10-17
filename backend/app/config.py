@@ -18,9 +18,11 @@ VISION_PROCESS_FPS = float(os.getenv("VISION_PROCESS_FPS", "1.4"))
 VISION_MAX_WIDTH = int(os.getenv("VISION_MAX_WIDTH", "640"))
 VISION_MODEL_PATH = Path(os.getenv("VISION_MODEL_PATH", str(MODELS_DIR / "yolox_tiny.onnx"))).resolve()
 VISION_PERSON_CONFIDENCE = float(os.getenv("VISION_PERSON_CONFIDENCE", "0.42"))
+# ByteTrack-style second association: these detections may maintain an existing
+# track through blur/partial occlusion, but they never create a new person.
+VISION_TRACK_LOW_CONFIDENCE = float(os.getenv("VISION_TRACK_LOW_CONFIDENCE", "0.20"))
 VISION_NMS_THRESHOLD = float(os.getenv("VISION_NMS_THRESHOLD", "0.45"))
 # Zero by default: each stable track gets its own timeline event, including
-# multiple people entering the frame at nearly the same time. Set an override
-# only if a particular deployment prefers aggressive event rate limiting.
+# multiple people entering the frame at nearly the same time.
 VISION_EVENT_COOLDOWN_SECONDS = float(os.getenv("VISION_EVENT_COOLDOWN_SECONDS", "0"))
 PTZ_ONVIF_PORT = int(os.getenv("PTZ_ONVIF_PORT", "8899"))
