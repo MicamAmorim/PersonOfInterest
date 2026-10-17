@@ -8,18 +8,26 @@ import onnxruntime as ort
 
 
 class YoloXPersonDetector:
-    """CPU-friendly YOLOX detector that returns only COCO class 0 (person)."""
+    """CPU-friendly YOLOX detector that returns only COCO class 0 (person).
+
+    `confidence` is the normal/high threshold used to create new tracks.
+    `low_confidence` is only exposed so the tracker can maintain an existing
+    identity through motion blur or partial occlusion. The tracker decides
+    whether a returned low-confidence detection may be used.
+    """
 
     def __init__(
         self,
         model_path: str | Path,
         confidence: float = 0.42,
         nms_threshold: float = 0.45,
+        low_confidence: float = 0.20,
     ) -> None:
         self.model_path = Path(model_path)
         if not self.model_path.is_file():
             raise FileNotFoundError(f"Modelo YOLOX não encontrado: {self.model_path}")
         self.confidence = float(confidence)
+        self.low_confidence = min(float(low_confidence), self.confidence)
         self.nms_threshold = float(nms_threshold)
 
         options = ort.SessionOptions()
@@ -50,15 +58,11 @@ class YoloXPersonDetector:
         return np.concatenate(grids, axis=1).astype(np.float32), np.concatenate(expanded, axis=1).astype(np.float32)
 
     def _preprocess(self, image: Any) -> tuple[np.ndarray, float]:
-        import cv2  # local import keeps module import failure isolated
+        import cv2
 
         h, w = image.shape[:2]
         ratio = min(self.input_h / h, self.input_w / w)
-        resized = cv2.resize(
-            image,
-            (int(w * ratio), int(h * ratio)),
-            interpolation=cv2.INTER_LINEAR,
-        )
+        resized = cv2.resize(image, (int(w * ratio), int(h * ratio)), interpolation=cv2.INTER_LINEAR)
         padded = np.full((self.input_h, self.input_w, 3), 114, dtype=np.uint8)
         padded[: resized.shape[0], : resized.shape[1]] = resized
         tensor = padded.transpose(2, 0, 1).astype(np.float32)
@@ -99,9 +103,8 @@ class YoloXPersonDetector:
         raw = self.session.run(None, {self.input_name: tensor})[0]
         predictions = self._decode(raw)[0]
 
-        # COCO class 0 is person. YOLOX score = objectness * class probability.
         person_scores = predictions[:, 4] * predictions[:, 5]
-        mask = person_scores >= self.confidence
+        mask = person_scores >= self.low_confidence
         if not np.any(mask):
             return []
 
@@ -122,13 +125,7 @@ class YoloXPersonDetector:
         for idx in self._nms(xyxy, scores, self.nms_threshold):
             x1, y1, x2, y2 = xyxy[idx]
             w, h = x2 - x1, y2 - y1
-            # Drop degenerate detections and very tiny visual noise.
             if w < 12 or h < 24:
                 continue
-            detections.append(
-                (
-                    (int(round(x1)), int(round(y1)), int(round(w)), int(round(h))),
-                    float(scores[idx]),
-                )
-            )
+            detections.append(((int(round(x1)), int(round(y1)), int(round(w)), int(round(h))), float(scores[idx])))
         return detections
