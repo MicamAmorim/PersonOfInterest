@@ -42,6 +42,25 @@ class AlertRuleTests(unittest.TestCase):
         event["created_at"] = "2026-10-17T14:30:00+00:00"
         self.assertFalse(manager._matches(rule, event))
 
+    def test_false_positive_never_matches(self):
+        manager = AlertManager()
+        rule = {
+            "camera_id": None,
+            "person_id": None,
+            "unknown_only": 0,
+            "start_time": None,
+            "end_time": None,
+            "weekdays_json": "[0,1,2,3,4,5,6]",
+            "timezone": "UTC",
+        }
+        event = {
+            "camera_id": 1,
+            "person_id": None,
+            "identity_state": "false_positive",
+            "created_at": "2026-10-17T14:30:00+00:00",
+        }
+        self.assertFalse(manager._matches(rule, event))
+
     def test_rule_rejects_unknown_and_specific_person(self):
         with self.assertRaises(ValueError):
             AlertRuleCreate(name="x", unknown_only=True, person_id=1)
