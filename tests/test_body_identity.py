@@ -7,7 +7,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.body_identity import _vector_to_blob, rank_probable
+from app.body_identity import BodyIdentityManager, _vector_to_blob, rank_probable
 
 
 class BodyIdentityTests(unittest.TestCase):
@@ -52,6 +52,30 @@ class BodyIdentityTests(unittest.TestCase):
         self.assertIsNone(person_id)
         self.assertIsNone(confidence)
         self.assertIsNone(source)
+
+    def test_fixed_batch_osnet_repeats_one_crop_and_returns_one_embedding(self):
+        class FixedBatchSession:
+            def __init__(self):
+                self.seen_shape = None
+
+            def run(self, _outputs, feed):
+                tensor = next(iter(feed.values()))
+                self.seen_shape = tuple(tensor.shape)
+                return [np.tile(np.asarray([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32), (tensor.shape[0], 1))]
+
+        manager = BodyIdentityManager()
+        manager._session = FixedBatchSession()
+        manager._input_name = "input"
+        manager._nchw = True
+        manager._batch_size = 16
+        manager._ensure_model = lambda: None
+
+        crop = np.zeros((300, 160, 3), dtype=np.uint8)
+        embedding = manager._embed_crop(crop)
+
+        self.assertEqual(manager._session.seen_shape, (16, 3, 256, 128))
+        self.assertEqual(embedding.shape, (4,))
+        self.assertAlmostEqual(float(np.linalg.norm(embedding)), 1.0, places=5)
 
 
 if __name__ == "__main__":
