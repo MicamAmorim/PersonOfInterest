@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, WebSocket, WebSoc
 from fastapi.responses import FileResponse
 
 from .alerts import manager as alert_manager
+from .body_identity import manager as body_identity_manager
 from .config import FACES_DIR, GO2RTC_API_URL
 from .db import connection, utc_now
 from .identity import manager as identity_manager
@@ -98,11 +99,7 @@ def _read_go2rtc_asset(asset_name: str) -> bytes:
 
 @router.get("/go2rtc/{asset_name}", include_in_schema=False)
 async def go2rtc_player_asset(asset_name: str) -> Response:
-    """Expose only go2rtc's universal player assets through the app origin.
-
-    The universal player can choose MSE for H.265 cameras instead of forcing
-    browser WebRTC, while still working behind Tailscale Serve/HTTPS.
-    """
+    """Expose only go2rtc's universal player assets through the app origin."""
     content_type = _GO2RTC_PLAYER_ASSETS.get(asset_name)
     if content_type is None:
         raise HTTPException(status_code=404, detail="Recurso go2rtc não permitido")
@@ -115,10 +112,6 @@ async def go2rtc_player_asset(asset_name: str) -> Response:
 
 @router.websocket("/go2rtc/api/ws")
 async def go2rtc_stream_proxy(websocket: WebSocket) -> None:
-    """Proxy the official go2rtc universal player's WS/MSE/WebRTC channel.
-
-    Only stream names belonging to enabled PersonOfInterest cameras are allowed.
-    """
     src = (websocket.query_params.get("src") or "").strip()
     if not src:
         await websocket.close(code=4400)
@@ -140,7 +133,9 @@ async def go2rtc_stream_proxy(websocket: WebSocket) -> None:
 
 @router.get("/api/identity/status")
 def identity_status() -> dict:
-    return identity_manager.state()
+    state = identity_manager.state()
+    state["body_reid"] = body_identity_manager.state()
+    return state
 
 
 @router.get("/api/identity/clusters")
@@ -159,7 +154,9 @@ def identity_cluster_face(cluster_id: int) -> FileResponse:
 @router.post("/api/identity/clusters/{cluster_id}/assign")
 def assign_identity_cluster(cluster_id: int, payload: IdentityAssignRequest) -> dict:
     try:
-        return identity_manager.assign_cluster(cluster_id, person_id=payload.person_id, name=payload.name)
+        result = identity_manager.assign_cluster(cluster_id, person_id=payload.person_id, name=payload.name)
+        body_identity_manager.notify_change()
+        return result
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -168,8 +165,17 @@ def assign_identity_cluster(cluster_id: int, payload: IdentityAssignRequest) -> 
 
 @router.post("/api/identity/events/{event_id}/assign")
 def assign_identity_event(event_id: int, payload: IdentityAssignRequest) -> dict:
+    """Manual identity correction/confirmation from the timeline.
+
+    Manual confirmation is absolute because it comes from the user. If a face
+    sample exists it is reassigned to the chosen person; the body crop becomes a
+    verified ReID reference too, but body-only future matches remain "Provável".
+    """
     try:
-        return identity_manager.assign_event(event_id, person_id=payload.person_id, name=payload.name)
+        result = identity_manager.assign_event(event_id, person_id=payload.person_id, name=payload.name)
+        body_identity_manager.confirm_event_identity(event_id, int(result["person_id"]))
+        body_identity_manager.notify_change()
+        return result
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -178,7 +184,9 @@ def assign_identity_event(event_id: int, payload: IdentityAssignRequest) -> dict
 
 @router.post("/api/identity/reindex")
 def identity_reindex(include_no_face: bool = False) -> dict:
-    return identity_manager.reindex(include_no_face=include_no_face)
+    result = identity_manager.reindex(include_no_face=include_no_face)
+    body_identity_manager.notify_change()
+    return result
 
 
 def _delete_face_crop(relative: str | None) -> None:
@@ -198,9 +206,9 @@ def _delete_face_crop(relative: str | None) -> None:
 def set_event_false_positive(event_id: int, value: bool = Query(...)) -> dict:
     """Mark/unmark a detection as a false positive.
 
-    Marking one invalidates any identity sample produced from that event. If it
-    belonged to an unknown cluster, that cluster is rebuilt from the remaining
-    events so a bad detection cannot poison its centroid/history.
+    Face/body identity evidence is removed. The OSNet appearance embedding is
+    retained separately as a hard-negative sample for future detector tuning;
+    it is never used as a positive identity reference.
     """
     crops_to_delete: set[str] = set()
     with connection() as conn:
@@ -224,7 +232,8 @@ def set_event_false_positive(event_id: int, value: bool = Query(...)) -> dict:
                 conn.execute("DELETE FROM face_samples WHERE cluster_id = ?", (cluster_id,))
                 conn.execute(
                     """UPDATE events
-                    SET person_id = NULL, unknown_cluster_id = NULL,
+                    SET person_id = NULL, probable_person_id = NULL, body_confidence = NULL,
+                        body_identity_source = NULL, unknown_cluster_id = NULL,
                         identity_state = 'pending', identity_confidence = NULL
                     WHERE unknown_cluster_id = ? AND id <> ?
                       AND COALESCE(identity_state, '') <> 'false_positive'""",
@@ -241,7 +250,8 @@ def set_event_false_positive(event_id: int, value: bool = Query(...)) -> dict:
             conn.execute("DELETE FROM face_samples WHERE event_id = ?", (event_id,))
             conn.execute(
                 """UPDATE events
-                SET person_id = NULL, unknown_cluster_id = NULL,
+                SET person_id = NULL, probable_person_id = NULL, body_confidence = NULL,
+                    body_identity_source = NULL, unknown_cluster_id = NULL,
                     identity_state = 'false_positive', identity_confidence = NULL
                 WHERE id = ?""",
                 (event_id,),
@@ -260,13 +270,19 @@ def set_event_false_positive(event_id: int, value: bool = Query(...)) -> dict:
             conn.execute("DELETE FROM face_samples WHERE event_id = ?", (event_id,))
             conn.execute(
                 """UPDATE events
-                SET person_id = NULL, unknown_cluster_id = NULL,
+                SET person_id = NULL, probable_person_id = NULL, body_confidence = NULL,
+                    body_identity_source = NULL, unknown_cluster_id = NULL,
                     identity_state = 'pending', identity_confidence = NULL
                 WHERE id = ?""",
                 (event_id,),
             )
             conn.execute("DELETE FROM alert_event_state WHERE event_id = ?", (event_id,))
         conn.commit()
+
+    if value:
+        body_identity_manager.record_false_positive(event_id)
+    else:
+        body_identity_manager.undo_false_positive(event_id)
 
     for crop in crops_to_delete:
         _delete_face_crop(crop)
