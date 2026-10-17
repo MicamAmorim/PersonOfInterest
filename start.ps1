@@ -16,16 +16,18 @@ $ModelsDir = Join-Path $Root "data\models"
 $VisionModel = Join-Path $ModelsDir "yolox_tiny.onnx"
 $FaceDetectorModel = Join-Path $ModelsDir "face_detection_yunet_2023mar.onnx"
 $FaceRecognizerModel = Join-Path $ModelsDir "face_recognition_sface_2021dec.onnx"
+$BodyReidModel = Join-Path $ModelsDir "osnet_x0_25_msmt17.onnx"
 
 $VisionModelUrl = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx"
 $FaceDetectorModelUrl = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 $FaceRecognizerModelUrl = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+$BodyReidModelUrl = "https://huggingface.co/anriha/osnet_x0_25_msmt17/resolve/main/osnet_x0_25_msmt17.onnx?download=true"
 
 if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
 }
 
-Write-Host "Verificando dependencias da V3/V4..." -ForegroundColor DarkGray
+Write-Host "Verificando dependencias da V4.1..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
@@ -39,13 +41,13 @@ if ($depsExitCode -ne 0) {
     Write-Host "Ajustando dependencias de visao, identidade, fusos horarios e Web Push..." -ForegroundColor Yellow
     & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao instalar as dependencias da V3/V4."
+        throw "Falha ao instalar as dependencias da V4.1."
     }
 }
 
 & $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Timezone DB OK | Web Push OK')"
 if ($LASTEXITCODE -ne 0) {
-    throw "Dependencias da V3/V4 nao estao compativeis."
+    throw "Dependencias da V4.1 nao estao compativeis."
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
@@ -71,6 +73,7 @@ function Ensure-Model([string]$Path, [string]$Url, [long]$MinimumBytes, [string]
 Ensure-Model $VisionModel $VisionModelUrl 1000000 "YOLOX-Tiny ONNX"
 Ensure-Model $FaceDetectorModel $FaceDetectorModelUrl 150000 "YuNet face detector"
 Ensure-Model $FaceRecognizerModel $FaceRecognizerModelUrl 10000000 "SFace face embedding"
+Ensure-Model $BodyReidModel $BodyReidModelUrl 700000 "OSNet x0.25 body ReID"
 
 $env:DATA_DIR = Join-Path $Root "data"
 $env:FRONTEND_DIR = Join-Path $Root "frontend"
@@ -79,6 +82,7 @@ $env:GO2RTC_BROWSER_BASE = "direct"
 $env:VISION_MODEL_PATH = $VisionModel
 $env:FACE_DETECTOR_MODEL_PATH = $FaceDetectorModel
 $env:FACE_RECOGNIZER_MODEL_PATH = $FaceRecognizerModel
+$env:BODY_REID_MODEL_PATH = $BodyReidModel
 
 $runtimeYaml = @'
 api:
@@ -93,7 +97,7 @@ log:
 '@
 [System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
 
-Write-Host "=== PersonOfInterest V4 ===" -ForegroundColor Cyan
+Write-Host "=== PersonOfInterest V4.1 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
@@ -113,7 +117,7 @@ try {
         throw "go2rtc nao respondeu na porta 1984."
     }
 
-    Write-Host "Iniciando API, identidade, alertas, timeline e visao em http://localhost:8080 ..."
+    Write-Host "Iniciando API, identidade facial/corporal, alertas, timeline e visao em http://localhost:8080 ..."
     $Backend = Start-Process -FilePath $PythonExe -ArgumentList @(
         "-m", "uvicorn", "app.main:app",
         "--app-dir", "backend",
@@ -138,7 +142,7 @@ try {
         throw "O backend nao respondeu na porta 8080."
     }
 
-    Write-Host "PersonOfInterest V4 online: http://localhost:8080" -ForegroundColor Green
+    Write-Host "PersonOfInterest V4.1 online: http://localhost:8080" -ForegroundColor Green
     Write-Host "Para acesso seguro no celular: .\tailscale-serve.ps1" -ForegroundColor DarkGray
     Write-Host "Pressione Ctrl+C para encerrar." -ForegroundColor DarkGray
     if (-not $NoBrowser) {
