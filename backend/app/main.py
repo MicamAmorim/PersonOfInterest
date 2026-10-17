@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from . import discovery, go2rtc, ptz
 from .config import APP_NAME, APP_VERSION, DB_PATH, EVENTS_DIR, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
-from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest, PTZMoveRequest, VisionFollowRequest
+from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest, PTZMoveRequest, VisionFollowRequest, VisionSettingsUpdate
 from .vision import manager as vision_manager
 
 
@@ -208,11 +208,20 @@ def set_follow(camera_id: int, payload: VisionFollowRequest) -> dict:
     return vision_manager.set_auto_follow(camera_id, payload.enabled, payload.track_id)
 
 
+@app.patch("/api/vision/cameras/{camera_id}/settings")
+def update_vision_settings(camera_id: int, payload: VisionSettingsUpdate) -> dict:
+    get_camera_row(camera_id)
+    settings = vision_manager.set_autofollow_max_speed(camera_id, payload.autofollow_max_speed)
+    return {"ok": True, "autofollow_max_speed": float(settings.get("autofollow_max_speed", 0.65))}
+
+
 @app.get("/api/cameras/{camera_id}/ptz/status")
 async def ptz_status(camera_id: int) -> dict:
     row = get_camera_row(camera_id)
     result = await asyncio.to_thread(ptz.probe, row["rtsp_url"])
-    result["home_preset_set"] = bool(vision_manager.settings_for(camera_id).get("home_preset_set"))
+    settings = vision_manager.settings_for(camera_id)
+    result["home_preset_set"] = bool(settings.get("home_preset_set"))
+    result["autofollow_max_speed"] = float(settings.get("autofollow_max_speed", 0.65))
     return result
 
 
