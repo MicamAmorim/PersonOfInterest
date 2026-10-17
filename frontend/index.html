@@ -37,6 +37,7 @@
         </div>
         <div class="top-actions">
           <button class="button ghost" id="refreshBtn">↻ Atualizar</button>
+          <button class="button ghost" id="discoverBtn">⌁ Descobrir câmeras</button>
           <button class="button primary" id="addCameraBtn">＋ Nova câmera</button>
         </div>
       </header>
@@ -57,7 +58,7 @@
           <div class="empty-icon">◉</div>
           <h3>Nenhuma câmera cadastrada</h3>
           <p>Adicione a primeira URL RTSP. As credenciais ficam somente no banco local.</p>
-          <button class="button primary" id="emptyAddBtn">Adicionar câmera</button>
+          <div class="empty-actions"><button class="button ghost" id="emptyDiscoverBtn">Descobrir na rede</button><button class="button primary" id="emptyAddBtn">Adicionar manualmente</button></div>
         </div>
       </section>
 
@@ -79,7 +80,7 @@
             <p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2>
             <div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div>
             <div class="info-row"><span>Streaming</span><strong>go2rtc</strong></div>
-            <div class="info-row"><span>Gateway</span><strong>Caddy</strong></div>
+            <div class="info-row"><span>Gateway</span><strong>Nativo / Caddy opcional</strong></div>
             <div class="info-row"><span>Cliente</span><strong>PWA</strong></div>
           </article>
           <article class="panel info-panel">
@@ -106,12 +107,37 @@
     </form>
   </dialog>
 
+  <dialog id="discoveryDialog" class="modal discovery-modal">
+    <div class="discovery-shell">
+      <div class="modal-header">
+        <div><p class="eyebrow">REDE LOCAL</p><h2>Descobrir câmeras</h2><span id="discoverySubtitle" class="muted">Procurando RTSP e ONVIF na rede local</span></div>
+        <button class="icon-button" type="button" data-discovery-close>×</button>
+      </div>
+      <div id="discoveryStatus" class="discovery-status">Pronto para escanear.</div>
+      <div id="discoveryList" class="discovery-list"></div>
+      <section id="discoverySetup" class="discovery-setup hidden">
+        <div class="setup-heading"><div><p class="eyebrow">CONFIGURAR</p><h3 id="discoveryDeviceTitle">Câmera</h3></div><button type="button" class="button ghost small" id="backToDiscoveryBtn">← Voltar</button></div>
+        <label>Usuário<input id="discoveryUsername" type="text" autocomplete="username" placeholder="Ex.: admin" /></label>
+        <label>Senha<input id="discoveryPassword" type="password" autocomplete="current-password" placeholder="Senha do dispositivo" /></label>
+        <label>Nome da câmera <span class="optional">opcional</span><input id="discoveryName" type="text" maxlength="80" placeholder="Ex.: Portão" /></label>
+        <p class="field-help">O PersonOfInterest testa o RTSP antes de salvar. As credenciais não são exibidas novamente pela API.</p>
+        <div id="discoveryProbeResult" class="probe-result hidden"></div>
+        <div class="modal-actions">
+          <button type="button" class="button ghost" id="testDiscoveryBtn">Testar acesso </button>
+          <button type="button" class="button primary" id="saveDiscoveryBtn" disabled>Adicionar câmera</button>
+        </div>
+      </section>
+    </div>
+  </dialog>
+
+
   <dialog id="viewerDialog" class="viewer-modal">
     <div class="viewer-header"><div><p class="eyebrow">AO VIVO</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div><button class="icon-button" type="button" data-viewer-close>×</button></div>
     <div class="viewer-frame-wrap"><iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe></div>
   </dialog>
 
   <div id="toast" class="toast"></div>
-  <script src="/app.js" defer></script>
+  <script src="/app-core.js" defer></script>
+  <script src="/app-runtime.js" defer></script>
 </body>
 </html>

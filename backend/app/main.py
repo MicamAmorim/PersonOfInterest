@@ -11,10 +11,10 @@ from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import go2rtc
+from . import discovery, go2rtc
 from .config import APP_NAME, APP_VERSION, DB_PATH, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
-from .models import CameraCreate, CameraOut, CameraUpdate
+from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest
 
 
 def mask_rtsp_url(raw: str) -> tuple[str, bool]:
@@ -116,6 +116,37 @@ async def health() -> dict:
     }
 
 
+@app.post("/api/discovery/scan")
+async def discover_cameras() -> dict:
+    with connection() as conn:
+        urls = [r["rtsp_url"] for r in conn.execute("SELECT rtsp_url FROM cameras").fetchall()]
+    existing_hosts = discovery.hosts_from_rtsp_urls(urls)
+    return await discovery.scan_local_network(existing_hosts)
+
+
+@app.post("/api/discovery/probe")
+async def probe_discovered_camera(payload: DiscoveryProbeRequest) -> dict:
+    paths = (payload.path,) if payload.path else None
+    try:
+        result = await asyncio.to_thread(
+            discovery.probe_rtsp,
+            payload.ip,
+            payload.username,
+            payload.password,
+            payload.port,
+            paths,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": result.ok,
+        "status_code": result.status_code,
+        "auth_required": result.auth_required,
+        "path": result.path,
+        "error": result.error,
+    }
+
+
 @app.get("/api/cameras", response_model=list[CameraOut])
 def list_cameras() -> list[CameraOut]:
     with connection() as conn:
@@ -199,31 +230,24 @@ async def delete_camera(camera_id: int) -> Response:
 if FRONTEND_DIR.exists():
     assets_dir = FRONTEND_DIR / "assets"
     if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        app.mount("/assets", StaticFiles(directory=assets_diŠK˜[YOH˜\ÜÙ]ÈŠB‚ˆ\™Ù]
+‹ÛX[šY™\İÙX›X[šY™\İ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆX[šY™\İ
 
-    @app.get("/manifest.webmanifest", include_in_schema=False)
-    def manifest() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈ›X[šY™\İÙX›X[šY™\İ‹YYXWİ\OH˜\XØ][Û‹ÛX[šY™\İ
+ÚœÛÛˆŠB‚ˆ\™Ù]
+‹ÜİËšœÈ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆÙ\šXÙWİÛÜšÙ\Š
+HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈœİËšœÈ‹YYXWİ\OH˜\XØ][Û‹Ú˜]˜\ØÜš\‹XY\œÏ^È”Ù\šXÙKUÛÜšÙ\‹P[İÙYˆ‹ÈŸJB‚ˆ\™Ù]
+‹ÚXÛÛ‹œİ™È‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆXÛÛŠ
+HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈšXÛÛ‹œİ™È‹YYXWİ\OHš[XYÙKÜİ™ÊŞ[ŠB‚ˆ\™Ù]
+‹Üİ[\Ë˜ÜÜÈ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆİ[\Ê
+HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈœİ[\Ë˜ÜÜÈ‹YYXWİ\OH^ØÜÜÈŠB‚ˆ\™Ù]
+‹Ø\šœÈ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆØÜš\
 
-    @app.get("/sw.js", include_in_schema=False)
-    def service_worker() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "sw.js", media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
-
-    @app.get("/icon.svg", include_in_schema=False)
-    def icon() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "icon.svg", media_type="image/svg+xml")
-
-    @app.get("/styles.css", include_in_schema=False)
-    def styles() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "styles.css", media_type="text/css")
-
-    @app.get("/app.js", include_in_schema=False)
-    def script() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "app.js", media_type="application/javascript")
-
-    @app.get("/{path:path}", include_in_schema=False)
-    def spa_fallback(path: str) -> FileResponse:
-        requested = (FRONTEND_DIR / path).resolve()
-        if path and requested.is_file() and FRONTEND_DIR.resolve() in requested.parents:
-            return FileResponse(requested)
-        return FileResponse(FRONTEND_DIR / "index.html")
+HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈ˜\šœÈ‹YYXWİ\OH˜\XØ][Û‹Ú˜]˜\ØÜš\ŠB‚ˆ\™Ù]
+‹ŞÜ]œ]H‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆÜWÙ˜[˜XÚÊ]ˆİŠHOˆš[T™\ÜÛœÙN‚ˆ™\]Y\İYH
+”“Ó•S‘ÑTˆÈ]
+Kœ™\ÛÛ™J
+BˆYˆ][™™\]Y\İYš\×Ùš[J
+H[™”“Ó•S‘ÑT‹œ™\ÛÛ™J
+H[ˆ™\]Y\İYœ\™[Î‚ˆ™]\›ˆš[T™\ÜÛœÙJ™\]Y\İY
+Bˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈš[™^š[ŠB

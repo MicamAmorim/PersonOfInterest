@@ -9,6 +9,8 @@ Local-first IP camera dashboard. V1 establishes the NVR foundation: RTSP camera 
 - FastAPI backend
 - Persistent SQLite database
 - Add, edit, enable/disable, re-sync and delete cameras
+- Local camera discovery (RTSP :554 / ONVIF :8899)
+- Credential prompt + real RTSP DESCRIBE test before saving a discovered camera
 - RTSP credentials remain local and are masked in API responses
 - go2rtc stream synchronization
 - WebRTC playback with MSE/MP4/MJPEG fallbacks
@@ -35,6 +37,12 @@ After startup the browser opens automatically at:
 ```text
 http://localhost:8080
 ```
+
+### Discover cameras automatically
+
+Click **Descobrir câmeras**. PersonOfInterest scans only the computer's local `/24` subnet and surfaces devices that expose RTSP (`554`) or ONVIF (`8899`). Selecting a device first attempts RTSP without credentials; if the camera requires authentication, the UI asks for the device username/password, performs a real RTSP `DESCRIBE`, discovers the supported iCSee-style `/live/ch00_0` or `/live/ch00_1` path, and enables **Adicionar câmera** only after the probe succeeds.
+
+Discovery does not send or store credentials until you explicitly add the camera. Once saved, the RTSP URL is persisted only in the local SQLite database and API responses mask its credentials.
 
 To start later, only run:
 
