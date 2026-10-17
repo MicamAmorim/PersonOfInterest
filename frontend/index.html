@@ -51,7 +51,21 @@
         <div class="panel timeline-panel">
           <div class="panel-header timeline-header">
             <div><p class="eyebrow">VISÃO COMPUTACIONAL</p><h2>Timeline de pessoas</h2></div>
-            <div class="timeline-filters"><select id="timelineCamera"><option value="">Todas as câmeras</option></select><button class="button ghost small" id="timelineRefresh">↻ Atualizar</button><button class="button danger small" id="timelineDeleteAll">Excluir todos</button></div>
+            <div class="timeline-actions">
+              <button class="button ghost small" id="timelineSelectAll">Selecionar visíveis</button>
+              <button class="button danger small" id="timelineDeleteSelected" disabled>Excluir selecionados (0)</button>
+              <button class="button danger small" id="timelineDeleteAll">Excluir todos</button>
+            </div>
+          </div>
+          <div class="timeline-filter-panel">
+            <label>Câmera<select id="timelineCamera"><option value="">Todas as câmeras</option></select></label>
+            <label>Pessoa<select id="timelinePerson"><option value="">Todas as pessoas</option><option value="unknown">Não identificadas</option></select></label>
+            <label>De<input id="timelineDateFrom" type="date" /></label>
+            <label>Até<input id="timelineDateTo" type="date" /></label>
+            <label>Hora inicial<input id="timelineTimeFrom" type="time" step="60" /></label>
+            <label>Hora final<input id="timelineTimeTo" type="time" step="60" /></label>
+            <label>Face<select id="timelineFace"><option value="">Com ou sem face</option><option value="1">Face detectada</option><option value="0">Sem face</option></select></label>
+            <div class="timeline-filter-buttons"><button class="button ghost small" id="timelineClearFilters">Limpar</button><button class="button primary small" id="timelineRefresh">Aplicar filtros</button></div>
           </div>
           <div id="timelineGrid" class="timeline-grid"><p class="muted">Carregando eventos…</p></div>
         </div>
@@ -60,7 +74,7 @@
       <section id="settingsView" class="view">
         <div class="settings-grid">
           <article class="panel info-panel"><p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2><div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div><div class="info-row"><span>Streaming</span><strong>go2rtc</strong></div><div class="info-row"><span>Visão</span><strong>YOLOX-Tiny ONNX</strong></div><div class="info-row"><span>PTZ</span><strong>DVRIP / ONVIF fallback</strong></div></article>
-          <article class="panel info-panel"><p class="eyebrow">V2</p><h2>Detecção e tracking</h2><p class="muted paragraph">Detecção de pessoas e faces, IDs de tracking por câmera, snapshots de eventos e auto-follow PTZ opcional. O reconhecimento de identidade por embeddings continua reservado para a V3.</p><button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button></article>
+          <article class="panel info-panel"><p class="eyebrow">V2</p><h2>Detecção e tracking</h2><p class="muted paragraph">Detecção de pessoas e faces, IDs de tracking por câmera, snapshots de eventos e auto-follow PTZ opcional. A timeline já aceita identidades persistentes para que a V3 de reconhecimento facial possa ligar eventos a nomes.</p><button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button></article>
         </div>
       </section>
     </main>
@@ -101,6 +115,8 @@
     <div class="viewer-header">
       <div><p class="eyebrow">AO VIVO · V2</p><h2 id="viewerTitle">Câmera</h2><span id="viewerLocation" class="muted"></span></div>
       <div class="viewer-actions">
+        <button class="button ghost small audio-toggle" id="listenAudioBtn" type="button" aria-pressed="false" title="Ouvir o microfone da câmera">🔇 Áudio</button>
+        <button class="button ghost small audio-toggle" id="talkMicBtn" type="button" aria-pressed="false" title="Enviar seu microfone para o alto-falante da câmera">🎙 Microfone</button>
         <button class="button ghost small" id="setHomeBtn" type="button">⌂ Definir Home</button>
         <button class="button ghost small" id="gotoHomeBtn" type="button" disabled>Ir para Home</button>
         <label class="follow-speed" title="Teto de velocidade do servomotor durante o auto-follow">
@@ -113,12 +129,12 @@
       </div>
     </div>
     <div class="viewer-frame-wrap" id="viewerStage">
-      <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>
+      <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen; microphone" referrerpolicy="same-origin"></iframe>
       <div id="visionOverlay" class="vision-overlay"></div>
       <div id="visionStatus" class="vision-status">Visão: iniciando…</div>
       <div id="ptzJoystick" class="ptz-joystick" title="Arraste para mover a câmera"><div class="ptz-ring"><div id="ptzKnob" class="ptz-knob"></div></div></div>
     </div>
-    <div class="viewer-footer"><span id="trackHint" class="muted">Clique numa caixa de pessoa para selecioná-la para acompanhamento.</span><span class="viewer-footer-status"><span id="homeStatus" class="muted">Home não definido</span><span id="ptzStatus" class="muted">PTZ: verificando…</span></span></div>
+    <div class="viewer-footer"><span id="trackHint" class="muted">Clique numa caixa de pessoa para selecioná-la para acompanhamento.</span><span class="viewer-footer-status"><span id="audioStatus" class="muted">Áudio e microfone mutados</span><span id="homeStatus" class="muted">Home não definido</span><span id="ptzStatus" class="muted">PTZ: verificando…</span></span></div>
   </dialog>
 
   <div id="toast" class="toast"></div>
