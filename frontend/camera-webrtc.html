@@ -29,62 +29,94 @@
     try { parent.postMessage({ source: 'personofinterest-camera-webrtc', type, message }, location.origin); } catch (_) {}
   }
 
-  async function getMicrophone() {
+  async function getMicrophoneTracks() {
     if (!microphone) return [];
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microfone indisponível. Abra o app por HTTPS ou localhost.');
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false,
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false,
     });
     return stream.getAudioTracks();
   }
 
-  async function connect() {
-    if (!cameraId) throw new Error('Câmera não informada.');
-    pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] });
-    pc.addTransceiver('video', { direction: 'recvonly' });
-    if (listen) pc.addTransceiver('audio', { direction: 'recvonly' });
+  async function createPeerConnection() {
+    const connection = new RTCPeerConnection({
+      iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }],
+    });
 
-    const micTracks = await getMicrophone();
-    for (const track of micTracks) {
-      localTracks.push(track);
-      pc.addTransceiver(track, { direction: 'sendonly' });
+    // Follow go2rtc's official webrtc.html pattern: receiver tracks are attached
+    // to the media element immediately, before SDP exchange. This avoids relying
+    // on browser-specific timing of the `track` event.
+    const mediaTracks = [];
+    const videoReceiver = connection.addTransceiver('video', { direction: 'recvonly' }).receiver.track;
+    mediaTracks.push(videoReceiver);
+
+    if (listen) {
+      const audioReceiver = connection.addTransceiver('audio', { direction: 'recvonly' }).receiver.track;
+      mediaTracks.push(audioReceiver);
     }
 
-    const remoteTracks = [];
-    pc.addEventListener('track', event => {
-      if (!remoteTracks.includes(event.track)) remoteTracks.push(event.track);
-      video.srcObject = new MediaStream(remoteTracks);
-      video.muted = !listen;
-      video.play().catch(() => report('autoplay-blocked', 'Toque no vídeo para iniciar o áudio.'));
-    });
-    video.addEventListener('click', () => video.play().catch(() => {}));
+    const micTracks = await getMicrophoneTracks();
+    for (const track of micTracks) {
+      localTracks.push(track);
+      connection.addTransceiver(track, { direction: 'sendonly' });
+    }
 
-    pc.addEventListener('connectionstatechange', () => {
-      if (pc.connectionState === 'connected') report('connected', microphone ? (listen ? 'Áudio + microfone ativos' : 'Microfone ativo') : (listen ? 'Áudio ativo' : 'Vídeo ativo'));
-      if (['failed','disconnected'].includes(pc.connectionState)) report('connection-error', `WebRTC: ${pc.connectionState}`);
+    video.srcObject = new MediaStream(mediaTracks);
+    video.muted = !listen;
+    video.addEventListener('click', () => {
+      video.muted = !listen;
+      video.play().catch(() => {});
     });
+
+    connection.addEventListener('connectionstatechange', () => {
+      const current = connection.connectionState;
+      if (current === 'connected') {
+        report('connected', microphone ? (listen ? 'Áudio + microfone ativos' : 'Microfone ativo') : (listen ? 'Áudio ativo' : 'Vídeo ativo'));
+        video.play().catch(() => report('autoplay-blocked', 'Toque no vídeo para iniciar a reprodução.'));
+      } else if (['failed', 'disconnected'].includes(current)) {
+        report('connection-error', `WebRTC: ${current}`);
+      }
+    });
+
+    return connection;
+  }
+
+  async function connect() {
+    if (!cameraId) throw new Error('Câmera não informada.');
+    pc = await createPeerConnection();
 
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Same-origin proxy handled by FastAPI. This works through Tailscale Serve,
-    // installed PWAs and normal localhost without exposing go2rtc :1984.
     ws = new WebSocket(`${scheme}://${location.host}/api/cameras/${encodeURIComponent(cameraId)}/webrtc/ws`);
-    ws.addEventListener('open', async () => {
+
+    ws.addEventListener('open', () => {
       pc.addEventListener('icecandidate', event => {
-        if (event.candidate && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'webrtc/candidate', value: event.candidate.candidate }));
+        if (!event.candidate || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: 'webrtc/candidate', value: event.candidate.candidate }));
       });
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: 'webrtc/offer', value: pc.localDescription.sdp }));
+
+      pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer))
+        .then(() => ws.send(JSON.stringify({ type: 'webrtc/offer', value: pc.localDescription.sdp })))
+        .catch(error => report('webrtc-error', error.message));
     });
+
     ws.addEventListener('message', event => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'webrtc/candidate') pc.addIceCandidate({ candidate: msg.value, sdpMid: '0' }).catch(() => {});
-      else if (msg.type === 'webrtc/answer') pc.setRemoteDescription({ type: 'answer', sdp: msg.value }).catch(error => report('webrtc-error', error.message));
-      else if (msg.type === 'error') report('webrtc-error', msg.value || 'Falha WebRTC');
+      let msg;
+      try { msg = JSON.parse(event.data); }
+      catch (_) { return; }
+      if (msg.type === 'webrtc/candidate') {
+        pc.addIceCandidate({ candidate: msg.value, sdpMid: '0' }).catch(() => {});
+      } else if (msg.type === 'webrtc/answer') {
+        pc.setRemoteDescription({ type: 'answer', sdp: msg.value }).catch(error => report('webrtc-error', error.message));
+      } else if (msg.type === 'error') {
+        report('webrtc-error', msg.value || 'Falha WebRTC');
+      }
     });
+
     ws.addEventListener('error', () => report('signal-error', 'Falha na sinalização WebRTC pelo PersonOfInterest.'));
     ws.addEventListener('close', () => {
-      if (pc && !['closed','failed'].includes(pc.connectionState)) report('signal-closed', 'Sinalização WebRTC encerrada.');
+      if (pc && !['closed', 'failed'].includes(pc.connectionState)) report('signal-closed', 'Sinalização WebRTC encerrada.');
     });
   }
 
@@ -93,8 +125,8 @@
     try { ws?.close(); } catch (_) {}
     try { pc?.close(); } catch (_) {}
   }
+
   addEventListener('beforeunload', cleanup);
-  video.muted = !listen;
   connect().catch(error => report('webrtc-error', error?.message || String(error)));
 })();
 </script>
