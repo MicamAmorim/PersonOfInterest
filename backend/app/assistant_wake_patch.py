@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 from .assistant import AssistantManager
@@ -22,6 +24,28 @@ def install() -> None:
         original_start(self)
         from .wake_word import manager as wake_word_manager
         wake_word_manager.start()
+
+        def warm_persisted_listener() -> None:
+            # assistant starts before startup camera sync. Give sync a short
+            # window, then preload Whisper only when a saved wake listener is
+            # actually active so normal users pay no model cost.
+            for _ in range(24):
+                if wake_word_manager.stop_event.is_set():
+                    return
+                try:
+                    if wake_word_manager._enabled_cameras():
+                        wake_word_manager._ensure_model()
+                        return
+                except Exception as exc:
+                    wake_word_manager.error = str(exc)
+                    return
+                time.sleep(0.5)
+
+        threading.Thread(
+            target=warm_persisted_listener,
+            name="poi-wake-persisted-warmup",
+            daemon=True,
+        ).start()
 
     def stop_with_wake(self: Any) -> None:
         try:
