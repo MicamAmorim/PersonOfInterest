@@ -152,4 +152,11 @@
 
   try { render(); } catch (_) {}
   try { renderTimeline(); } catch (_) {}
+
+  // Load the half-duplex audio controller after all legacy viewer handlers are
+  // registered. It replaces click-to-toggle microphone with push-to-talk.
+  const audioFix = document.createElement('script');
+  audioFix.src = '/v4-audio-fix.js';
+  audioFix.async = false;
+  document.head.appendChild(audioFix);
 })();
