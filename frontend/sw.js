@@ -1,4 +1,4 @@
-const CACHE = 'personofinterest-v2.3';
+const CACHE = 'personofinterest-v2.4';
 const SHELL = ['/', '/styles.css', '/v2.css', '/app-core.js', '/app-runtime.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
