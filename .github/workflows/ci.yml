@@ -19,3 +19,5 @@ jobs:
       - run: node --check frontend/app-runtime.js
       - run: node --check frontend/v34.js
       - run: node --check frontend/v4-stream-fix.js
+      - run: node --check frontend/v4-audio-fix.js
+      - run: node --check frontend/v42-assistant.js
