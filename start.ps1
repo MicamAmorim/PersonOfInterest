@@ -10,10 +10,9 @@ Set-Location $Root
 
 $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
 $Go2rtcExe = Join-Path $Root "bin\go2rtc.exe"
-$Go2rtcConfig = Join-Path $Root "infra\go2rtc\go2rtc.yaml"
 
 if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
-    throw "Instalação incompleta. Execute .\setup.ps1 primeiro."
+    throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
 }
 
 $env:DATA_DIR = Join-Path $Root "data"
@@ -23,7 +22,7 @@ $env:GO2RTC_BROWSER_BASE = "direct"
 
 Write-Host "=== PersonOfInterest ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
-$Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", $Go2rtcConfig) -WorkingDirectory $Root -PassThru -NoNewWindow
+$Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "infra\go2rtc\go2rtc.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
 $Backend = $null
 try {
@@ -38,7 +37,7 @@ try {
         }
     }
     if (-not $go2rtcReady) {
-        throw "go2rtc não respondeu na porta 1984."
+        throw "go2rtc nao respondeu na porta 1984."
     }
 
     Write-Host "Iniciando API e interface em http://localhost:8080 ..."
@@ -52,7 +51,7 @@ try {
     $backendReady = $false
     for ($i = 0; $i -lt 40; $i++) {
         if ($Backend.HasExited) {
-            throw "O backend encerrou durante a inicialização."
+            throw "O backend encerrou durante a inicializacao."
         }
         try {
             Invoke-WebRequest -Uri "http://127.0.0.1:8080/api/health" -UseBasicParsing -TimeoutSec 1 | Out-Null
@@ -63,7 +62,7 @@ try {
         }
     }
     if (-not $backendReady) {
-        throw "O backend não respondeu na porta 8080."
+        throw "O backend nao respondeu na porta 8080."
     }
 
     Write-Host "PersonOfInterest online: http://localhost:8080" -ForegroundColor Green
