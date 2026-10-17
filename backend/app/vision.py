@@ -28,7 +28,6 @@ from .yolox_detector import YoloXPersonDetector
 try:
     import cv2  # type: ignore
     import numpy as np  # type: ignore
-
     CV_AVAILABLE = True
     CV_IMPORT_ERROR: str | None = None
 except Exception as exc:  # pragma: no cover
@@ -54,8 +53,8 @@ class Track:
     smooth_cy: float | None = None
     smooth_w: float | None = None
     smooth_h: float | None = None
-    velocity_x: float = 0.0  # normalized frame widths / second
-    velocity_y: float = 0.0  # normalized frame heights / second
+    velocity_x: float = 0.0
+    velocity_y: float = 0.0
     last_control_monotonic: float | None = None
     control_valid: bool = False
     control_reason: str = "warming"
@@ -91,12 +90,6 @@ def _update_control_measurement(
     frame_shape: tuple[int, ...],
     high_confidence: float,
 ) -> None:
-    """Validate, smooth and estimate velocity from trustworthy observations.
-
-    Velocity is estimated only from accepted high-confidence measurements. A
-    partial/abrupt box may keep the track alive but cannot inject a large speed
-    estimate into the PTZ controller.
-    """
     height, width = frame_shape[:2]
     x, y, w, h = bbox
     cx, cy = _center(bbox)
@@ -138,8 +131,6 @@ def _update_control_measurement(
     track.control_valid = valid
     track.control_reason = reason
     if not valid:
-        # Do not let one poor box steer the camera. Decay momentum gradually so
-        # a short occlusion does not erase motion immediately either.
         track.velocity_x *= 0.72
         track.velocity_y *= 0.72
         return
@@ -147,9 +138,6 @@ def _update_control_measurement(
     previous_x = float(track.smooth_cx)
     previous_y = float(track.smooth_cy)
     dt = max(0.05, min(1.5, now - float(track.last_control_monotonic or now)))
-
-    # Adaptive positional smoothing: stable detections are smoother; genuine
-    # movement gets a little more responsiveness.
     alpha = 0.28 if jump < 0.07 else 0.42
     track.smooth_cx = (1 - alpha) * previous_x + alpha * cx
     track.smooth_cy = (1 - alpha) * previous_y + alpha * cy
@@ -159,27 +147,14 @@ def _update_control_measurement(
     raw_vx = ((track.smooth_cx - previous_x) / max(1.0, width)) / dt
     raw_vy = ((track.smooth_cy - previous_y) / max(1.0, height)) / dt
     raw_vx, raw_vy = _clamp_vector(raw_vx, raw_vy, VISION_MAX_TARGET_SPEED)
-
-    # Alpha-beta-like velocity filter. It is intentionally conservative: PTZ
-    # prediction should reduce lag, not amplify bounding-box jitter.
     beta = 0.34 if track.hits >= 4 else 0.24
     track.velocity_x = (1 - beta) * track.velocity_x + beta * raw_vx
     track.velocity_y = (1 - beta) * track.velocity_y + beta * raw_vy
-    track.velocity_x, track.velocity_y = _clamp_vector(
-        track.velocity_x,
-        track.velocity_y,
-        VISION_MAX_TARGET_SPEED,
-    )
+    track.velocity_x, track.velocity_y = _clamp_vector(track.velocity_x, track.velocity_y, VISION_MAX_TARGET_SPEED)
     track.last_control_monotonic = now
 
 
 class CentroidTracker:
-    """Two-stage association inspired by ByteTrack.
-
-    High-confidence detections can update or create tracks. Low-confidence
-    detections can only rescue an existing track through blur/partial occlusion.
-    """
-
     def __init__(self, high_confidence: float = VISION_PERSON_CONFIDENCE) -> None:
         self.next_id = 1
         self.tracks: dict[int, Track] = {}
@@ -209,11 +184,7 @@ class CentroidTracker:
                 best_idx, best_score = idx, score
         return best_idx
 
-    def update(
-        self,
-        detections: list[tuple[tuple[int, int, int, int], float]],
-        frame_shape: tuple[int, ...],
-    ) -> list[Track]:
+    def update(self, detections: list[tuple[tuple[int, int, int, int], float]], frame_shape: tuple[int, ...]) -> list[Track]:
         height, width = frame_shape[:2]
         diag = math.hypot(width, height)
         high = {i for i, (_, conf) in enumerate(detections) if conf >= self.high_confidence}
@@ -227,8 +198,7 @@ class CentroidTracker:
                 continue
             bbox, conf = detections[idx]
             high.remove(idx)
-            track.bbox = bbox
-            track.confidence = conf
+            track.bbox, track.confidence = bbox, conf
             track.hits += 1
             track.missed = 0
             track.last_seen_monotonic = time.monotonic()
@@ -242,8 +212,7 @@ class CentroidTracker:
                 continue
             bbox, conf = detections[idx]
             low.remove(idx)
-            track.bbox = bbox
-            track.confidence = conf
+            track.bbox, track.confidence = bbox, conf
             track.hits += 1
             track.missed = 0
             track.last_seen_monotonic = time.monotonic()
@@ -269,14 +238,7 @@ class CentroidTracker:
 
 
 class CameraVisionWorker(threading.Thread):
-    def __init__(
-        self,
-        manager: "VisionManager",
-        camera_id: int,
-        source_url: str,
-        camera_rtsp_url: str,
-        camera_name: str,
-    ) -> None:
+    def __init__(self, manager: "VisionManager", camera_id: int, source_url: str, camera_rtsp_url: str, camera_name: str) -> None:
         super().__init__(name=f"poi-vision-{camera_id}", daemon=True)
         self.manager = manager
         self.camera_id = camera_id
@@ -317,11 +279,8 @@ class CameraVisionWorker(threading.Thread):
             self.error = f"Falha ao carregar YOLOX ONNX: {exc}"
             return
 
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
         target_interval = 1.0 / max(0.2, VISION_PROCESS_FPS)
-
         while not self.stop_event.is_set():
             cap = cv2.VideoCapture(self.source_url, cv2.CAP_FFMPEG)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -355,20 +314,14 @@ class CameraVisionWorker(threading.Thread):
             frame = cv2.resize(frame, (VISION_MAX_WIDTH, int(h0 * scale)))
         height, width = frame.shape[:2]
         self.frame_size = (width, height)
-
         tracks = self.tracker.update(detector.detect(frame), frame.shape)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.12,
-            minNeighbors=5,
-            minSize=(34, 34),
-        )
-        face_boxes = [tuple(map(int, f)) for f in faces]
 
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=5, minSize=(34, 34))
+        face_boxes = [tuple(map(int, f)) for f in faces]
         for track in tracks:
             x, y, w, h = track.bbox
-            associated: list[tuple[int, int, int, int]] = []
+            associated = []
             for face in face_boxes:
                 fx, fy, fw, fh = face
                 cx, cy = fx + fw / 2, fy + fh / 2
@@ -378,12 +331,7 @@ class CameraVisionWorker(threading.Thread):
             if associated:
                 track.has_face = True
                 track.face_count = max(track.face_count, len(associated))
-            if (
-                track.hits >= 2
-                and track.confidence >= VISION_PERSON_CONFIDENCE
-                and track.event_id is None
-                and time.monotonic() - self.last_event_at >= VISION_EVENT_COOLDOWN_SECONDS
-            ):
+            if track.hits >= 2 and track.confidence >= VISION_PERSON_CONFIDENCE and track.event_id is None and time.monotonic() - self.last_event_at >= VISION_EVENT_COOLDOWN_SECONDS:
                 track.event_id = self._save_event(frame, track, associated)
                 self.last_event_at = time.monotonic()
             elif track.event_id and associated and not had_face_before:
@@ -393,40 +341,26 @@ class CameraVisionWorker(threading.Thread):
         self.tracks_state = [
             {
                 "track_id": t.id,
-                "bbox": {
-                    "x": t.bbox[0] / width,
-                    "y": t.bbox[1] / height,
-                    "w": t.bbox[2] / width,
-                    "h": t.bbox[3] / height,
-                },
+                "bbox": {"x": t.bbox[0] / width, "y": t.bbox[1] / height, "w": t.bbox[2] / width, "h": t.bbox[3] / height},
                 "confidence": round(float(t.confidence), 3),
                 "has_face": t.has_face,
                 "face_count": t.face_count,
                 "control_valid": t.control_valid,
                 "control_reason": t.control_reason,
-                "velocity": {
-                    "x": round(t.velocity_x, 3),
-                    "y": round(t.velocity_y, 3),
-                },
+                "velocity": {"x": round(t.velocity_x, 3), "y": round(t.velocity_y, 3)},
                 "predicted_center": (
                     {
                         "x": round(max(0.0, min(1.0, (t.smooth_cx or 0.0) / width + t.velocity_x * horizon)), 3),
                         "y": round(max(0.0, min(1.0, (t.smooth_cy or 0.0) / height + t.velocity_y * horizon)), 3),
                     }
-                    if t.smooth_cx is not None and t.smooth_cy is not None
-                    else None
+                    if t.smooth_cx is not None and t.smooth_cy is not None else None
                 ),
             }
             for t in tracks
         ]
         self._auto_follow(tracks, width, height)
 
-    def _save_event(
-        self,
-        frame: Any,
-        track: Track,
-        faces: list[tuple[int, int, int, int]],
-    ) -> int | None:
+    def _save_event(self, frame: Any, track: Track, faces: list[tuple[int, int, int, int]]) -> int | None:
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         folder = EVENTS_DIR / day / str(self.camera_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -435,15 +369,7 @@ class CameraVisionWorker(threading.Thread):
         annotated = frame.copy()
         x, y, w, h = track.bbox
         cv2.rectangle(annotated, (x, y), (x + w, y + h), (255, 255, 255), 2)
-        cv2.putText(
-            annotated,
-            f"Person #{track.id}",
-            (x, max(20, y - 8)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            2,
-        )
+        cv2.putText(annotated, f"Person #{track.id}", (x, max(20, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
         for fx, fy, fw, fh in faces:
             cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), (180, 180, 180), 1)
         if not cv2.imwrite(str(path), annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 86]):
@@ -451,40 +377,21 @@ class CameraVisionWorker(threading.Thread):
         relative = str(path.relative_to(EVENTS_DIR)).replace("\\", "/")
         with connection() as conn:
             cursor = conn.execute(
-                """
-                INSERT INTO events(
-                    camera_id, track_id, event_type, has_face, face_count,
-                    confidence, snapshot_path, bbox_json, created_at
-                )
-                VALUES (?, ?, 'person', ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    self.camera_id,
-                    track.id,
-                    int(bool(faces)),
-                    len(faces),
-                    float(track.confidence),
-                    relative,
-                    json.dumps({"x": x, "y": y, "w": w, "h": h}),
-                    utc_now(),
-                ),
+                """INSERT INTO events(camera_id, track_id, event_type, has_face, face_count, confidence, snapshot_path, bbox_json, created_at)
+                VALUES (?, ?, 'person', ?, ?, ?, ?, ?, ?)""",
+                (self.camera_id, track.id, int(bool(faces)), len(faces), float(track.confidence), relative, json.dumps({"x": x, "y": y, "w": w, "h": h}), utc_now()),
             )
             conn.commit()
             return int(cursor.lastrowid)
 
     def _mark_face(self, event_id: int, face_count: int) -> None:
         with connection() as conn:
-            conn.execute(
-                "UPDATE events SET has_face = 1, face_count = MAX(face_count, ?) WHERE id = ?",
-                (face_count, event_id),
-            )
+            conn.execute("UPDATE events SET has_face = 1, face_count = MAX(face_count, ?) WHERE id = ?", (face_count, event_id))
             conn.commit()
 
     @staticmethod
     def _axis_command(error: float, active: bool) -> tuple[float, bool]:
-        enter = 0.17
-        exit_ = 0.10
-        threshold = exit_ if active else enter
+        threshold = 0.10 if active else 0.17
         if abs(error) < threshold:
             return 0.0, False
         return (1.0 if error > 0 else -1.0), True
@@ -494,9 +401,7 @@ class CameraVisionWorker(threading.Thread):
         if self.target_lost_since is None:
             self.target_lost_since = now
             return
-        if now - self.target_lost_since < 3.0 or self.home_returned_for_loss:
-            return
-        if not settings.get("home_preset_set"):
+        if now - self.target_lost_since < 3.0 or self.home_returned_for_loss or not settings.get("home_preset_set"):
             return
         self.home_returned_for_loss = True
         threading.Thread(target=self._return_home, daemon=True).start()
@@ -516,7 +421,6 @@ class CameraVisionWorker(threading.Thread):
         else:
             valid = [t for t in tracks if t.control_valid]
             target = max(valid, key=lambda t: t.bbox[2] * t.bbox[3]) if valid else None
-
         if target is None or target.smooth_cx is None or target.smooth_cy is None:
             self.pan_active = self.tilt_active = False
             self.follow_speed *= 0.65
@@ -525,65 +429,47 @@ class CameraVisionWorker(threading.Thread):
 
         self.target_lost_since = None
         self.home_returned_for_loss = False
-
-        # Predict a short time ahead to compensate for inference + network + PTZ
-        # latency. Prediction uses filtered velocity from the same track only.
         horizon = max(0.0, min(0.8, VISION_PREDICTION_HORIZON))
         current_x = target.smooth_cx / max(1.0, width)
         current_y = target.smooth_cy / max(1.0, height)
         predicted_x = max(0.03, min(0.97, current_x + target.velocity_x * horizon))
         predicted_y = max(0.03, min(0.97, current_y + target.velocity_y * horizon))
-        dx = predicted_x - 0.5
-        dy = predicted_y - 0.5
-
+        dx, dy = predicted_x - 0.5, predicted_y - 0.5
         pan, self.pan_active = self._axis_command(dx, self.pan_active)
         tilt, self.tilt_active = self._axis_command(-dy, self.tilt_active)
         if not (pan or tilt):
             self.follow_speed *= 0.60
             return
 
+        hard_ceiling = max(0.20, min(0.90, VISION_AUTOFOLLOW_MAX_SPEED))
+        camera_ceiling = max(0.20, min(hard_ceiling, float(settings.get("autofollow_max_speed", 0.65))))
         motion = min(VISION_MAX_TARGET_SPEED, math.hypot(target.velocity_x, target.velocity_y))
         error = max(abs(dx), abs(dy))
 
-        # Proportional position term + velocity feed-forward. A fast target gets
-        # more motor speed before it drifts far from center, but all commands are
-        # bounded by the configured safety ceiling.
-        requested_speed = 0.13 + error * 0.58 + min(0.17, motion * 0.20)
-        requested_speed = max(0.15, min(VISION_AUTOFOLLOW_MAX_SPEED, requested_speed))
+        # Position feedback + velocity feed-forward. Motion contributes more than
+        # before, but only inside the user-selected per-camera ceiling.
+        requested_speed = 0.13 + error * 0.60 + min(0.30, motion * 0.32)
+        requested_speed = max(0.15, min(camera_ceiling, requested_speed))
 
-        # Slew-rate limit: motor speed cannot jump sharply between detections.
-        blended = 0.62 * self.follow_speed + 0.38 * requested_speed if self.follow_speed else requested_speed
-        max_delta = 0.075
+        # Faster targets may accelerate the servo faster, still with a slew-rate
+        # limit to avoid abrupt motor commands caused by noisy detections.
+        blended = 0.56 * self.follow_speed + 0.44 * requested_speed if self.follow_speed else requested_speed
+        max_delta = 0.07 + min(0.09, motion * 0.09)
         if self.follow_speed:
             blended = max(self.follow_speed - max_delta, min(self.follow_speed + max_delta, blended))
-        self.follow_speed = max(0.14, min(VISION_AUTOFOLLOW_MAX_SPEED, blended))
+        self.follow_speed = max(0.14, min(camera_ceiling, blended))
 
-        # Faster targets are allowed a slightly shorter reaction interval, while
-        # still forcing a fresh vision observation between PTZ corrections.
-        min_interval = max(0.32, 0.50 - min(0.16, motion * 0.16))
+        min_interval = max(0.28, 0.48 - min(0.18, motion * 0.18))
         now = time.monotonic()
         if now - self.last_follow_move < min_interval:
             return
-
-        duration = min(0.20, max(0.11, 0.11 + error * 0.14))
+        duration = min(0.20, max(0.10, 0.10 + error * 0.14))
         self.last_follow_move = now
-        threading.Thread(
-            target=self._ptz_pulse,
-            args=(pan, tilt, self.follow_speed, duration),
-            daemon=True,
-        ).start()
+        threading.Thread(target=self._ptz_pulse, args=(pan, tilt, self.follow_speed, duration), daemon=True).start()
 
     def _ptz_pulse(self, pan: float, tilt: float, speed: float, duration: float) -> None:
         try:
-            ptz.pulse(
-                self.camera_rtsp_url,
-                pan,
-                tilt,
-                speed=speed,
-                duration=duration,
-                max_step=8,
-                max_consecutive=6,
-            )
+            ptz.pulse(self.camera_rtsp_url, pan, tilt, speed=speed, duration=duration, max_step=8, max_consecutive=6)
             self.manager.set_ptz_error(self.camera_id, None)
         except Exception as exc:
             self.manager.set_ptz_error(self.camera_id, str(exc))
@@ -597,11 +483,7 @@ class CameraVisionWorker(threading.Thread):
 
     def state(self) -> dict[str, Any]:
         settings = self.manager.settings_for(self.camera_id)
-        lost_for = (
-            0.0
-            if self.target_lost_since is None
-            else max(0.0, time.monotonic() - self.target_lost_since)
-        )
+        lost_for = 0.0 if self.target_lost_since is None else max(0.0, time.monotonic() - self.target_lost_since)
         return {
             "camera_id": self.camera_id,
             "status": self.status,
@@ -613,6 +495,7 @@ class CameraVisionWorker(threading.Thread):
             "auto_follow_enabled": bool(settings.get("auto_follow_enabled")),
             "selected_track_id": settings.get("selected_track_id"),
             "home_preset_set": bool(settings.get("home_preset_set")),
+            "autofollow_max_speed": float(settings.get("autofollow_max_speed", 0.65)),
             "target_lost_seconds": round(lost_for, 2),
             "follow_speed": round(self.follow_speed, 3),
             "prediction_horizon": VISION_PREDICTION_HORIZON,
@@ -635,34 +518,17 @@ class VisionManager:
     def import_error(self) -> str | None:
         return CV_IMPORT_ERROR
 
-    def start_camera(
-        self,
-        camera_id: int,
-        camera_rtsp_url: str,
-        stream_name: str,
-        name: str,
-    ) -> None:
+    def start_camera(self, camera_id: int, camera_rtsp_url: str, stream_name: str, name: str) -> None:
         if not CV_AVAILABLE:
             return
         source_url = f"rtsp://127.0.0.1:8554/{stream_name}"
         with self.lock:
             existing = self.workers.get(camera_id)
-            if (
-                existing
-                and existing.is_alive()
-                and existing.source_url == source_url
-                and existing.camera_rtsp_url == camera_rtsp_url
-            ):
+            if existing and existing.is_alive() and existing.source_url == source_url and existing.camera_rtsp_url == camera_rtsp_url:
                 return
             if existing:
                 existing.stop()
-            worker = CameraVisionWorker(
-                self,
-                camera_id,
-                source_url,
-                camera_rtsp_url,
-                name,
-            )
+            worker = CameraVisionWorker(self, camera_id, source_url, camera_rtsp_url, name)
             self.workers[camera_id] = worker
             worker.start()
 
@@ -679,71 +545,39 @@ class VisionManager:
     def state(self, camera_id: int) -> dict[str, Any]:
         worker = self.workers.get(camera_id)
         if not CV_AVAILABLE:
-            return {
-                "camera_id": camera_id,
-                "status": "unavailable",
-                "error": CV_IMPORT_ERROR,
-                "tracks": [],
-            }
+            return {"camera_id": camera_id, "status": "unavailable", "error": CV_IMPORT_ERROR, "tracks": []}
         if not worker:
-            return {"camera_id": camera_id, "status": "stopped", "tracks": []}
+            settings = self.settings_for(camera_id)
+            return {"camera_id": camera_id, "status": "stopped", "tracks": [], "autofollow_max_speed": float(settings.get("autofollow_max_speed", 0.65))}
         return worker.state()
 
     def settings_for(self, camera_id: int) -> dict[str, Any]:
         with self.lock:
             if camera_id not in self.runtime_settings:
                 with connection() as conn:
-                    row = conn.execute(
-                        "SELECT * FROM camera_runtime_settings WHERE camera_id = ?",
-                        (camera_id,),
-                    ).fetchone()
-                self.runtime_settings[camera_id] = (
-                    dict(row)
-                    if row
-                    else {
-                        "vision_enabled": 1,
-                        "auto_follow_enabled": 0,
-                        "selected_track_id": None,
-                        "home_preset_set": 0,
-                    }
-                )
+                    row = conn.execute("SELECT * FROM camera_runtime_settings WHERE camera_id = ?", (camera_id,)).fetchone()
+                self.runtime_settings[camera_id] = dict(row) if row else {
+                    "vision_enabled": 1,
+                    "auto_follow_enabled": 0,
+                    "selected_track_id": None,
+                    "home_preset_set": 0,
+                    "autofollow_max_speed": 0.65,
+                }
             return dict(self.runtime_settings[camera_id])
 
-    def set_auto_follow(
-        self,
-        camera_id: int,
-        enabled: bool,
-        track_id: int | None = None,
-    ) -> dict[str, Any]:
+    def set_auto_follow(self, camera_id: int, enabled: bool, track_id: int | None = None) -> dict[str, Any]:
         now = utc_now()
         with connection() as conn:
             conn.execute(
-                """
-                INSERT INTO camera_runtime_settings(
-                    camera_id, vision_enabled, auto_follow_enabled,
-                    selected_track_id, updated_at
-                )
+                """INSERT INTO camera_runtime_settings(camera_id, vision_enabled, auto_follow_enabled, selected_track_id, updated_at)
                 VALUES (?, 1, ?, ?, ?)
-                ON CONFLICT(camera_id) DO UPDATE SET
-                    auto_follow_enabled = excluded.auto_follow_enabled,
-                    selected_track_id = excluded.selected_track_id,
-                    updated_at = excluded.updated_at
-                """,
+                ON CONFLICT(camera_id) DO UPDATE SET auto_follow_enabled = excluded.auto_follow_enabled, selected_track_id = excluded.selected_track_id, updated_at = excluded.updated_at""",
                 (camera_id, int(enabled), track_id, now),
             )
             conn.commit()
         with self.lock:
-            current = self.runtime_settings.setdefault(
-                camera_id,
-                {"vision_enabled": 1, "home_preset_set": 0},
-            )
-            current.update(
-                {
-                    "auto_follow_enabled": int(enabled),
-                    "selected_track_id": track_id,
-                    "updated_at": now,
-                }
-            )
+            current = self.runtime_settings.setdefault(camera_id, {"vision_enabled": 1, "home_preset_set": 0, "autofollow_max_speed": 0.65})
+            current.update({"auto_follow_enabled": int(enabled), "selected_track_id": track_id, "updated_at": now})
         if not enabled:
             self.ptz_errors[camera_id] = None
         return self.settings_for(camera_id)
@@ -752,26 +586,31 @@ class VisionManager:
         now = utc_now()
         with connection() as conn:
             conn.execute(
-                """
-                INSERT INTO camera_runtime_settings(camera_id, home_preset_set, updated_at)
+                """INSERT INTO camera_runtime_settings(camera_id, home_preset_set, updated_at)
                 VALUES (?, ?, ?)
-                ON CONFLICT(camera_id) DO UPDATE SET
-                    home_preset_set = excluded.home_preset_set,
-                    updated_at = excluded.updated_at
-                """,
+                ON CONFLICT(camera_id) DO UPDATE SET home_preset_set = excluded.home_preset_set, updated_at = excluded.updated_at""",
                 (camera_id, int(is_set), now),
             )
             conn.commit()
         with self.lock:
-            current = self.runtime_settings.setdefault(
-                camera_id,
-                {
-                    "vision_enabled": 1,
-                    "auto_follow_enabled": 0,
-                    "selected_track_id": None,
-                },
-            )
+            current = self.runtime_settings.setdefault(camera_id, {"vision_enabled": 1, "auto_follow_enabled": 0, "selected_track_id": None, "autofollow_max_speed": 0.65})
             current.update({"home_preset_set": int(is_set), "updated_at": now})
+        return self.settings_for(camera_id)
+
+    def set_autofollow_max_speed(self, camera_id: int, value: float) -> dict[str, Any]:
+        value = max(0.20, min(0.90, float(value)))
+        now = utc_now()
+        with connection() as conn:
+            conn.execute(
+                """INSERT INTO camera_runtime_settings(camera_id, autofollow_max_speed, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(camera_id) DO UPDATE SET autofollow_max_speed = excluded.autofollow_max_speed, updated_at = excluded.updated_at""",
+                (camera_id, value, now),
+            )
+            conn.commit()
+        with self.lock:
+            current = self.runtime_settings.setdefault(camera_id, {"vision_enabled": 1, "auto_follow_enabled": 0, "selected_track_id": None, "home_preset_set": 0})
+            current.update({"autofollow_max_speed": value, "updated_at": now})
         return self.settings_for(camera_id)
 
     def set_ptz_error(self, camera_id: int, error: str | None) -> None:
