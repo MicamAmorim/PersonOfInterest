@@ -23,6 +23,21 @@ class VisionTrackerTests(unittest.TestCase):
         self.assertGreaterEqual(len(tracks), 1)
         self.assertTrue(any(t.id != 1 for t in tracks))
 
+    def test_low_confidence_detection_cannot_create_track(self):
+        tracker = CentroidTracker(high_confidence=0.42)
+        tracks = tracker.update([((100, 100, 80, 180), 0.25)], (480, 640, 3))
+        self.assertEqual(tracks, [])
+
+    def test_low_confidence_detection_can_rescue_existing_track_without_ptz(self):
+        tracker = CentroidTracker(high_confidence=0.42)
+        stable = tracker.update([((100, 100, 80, 180), 0.9)], (480, 640, 3))[0]
+        tracker.update([((106, 103, 80, 180), 0.88)], (480, 640, 3))
+        rescued = tracker.update([((112, 108, 78, 176), 0.25)], (480, 640, 3))[0]
+        self.assertEqual(rescued.id, stable.id)
+        self.assertEqual(rescued.missed, 0)
+        self.assertFalse(rescued.control_valid)
+        self.assertEqual(rescued.control_reason, "low_confidence")
+
     def test_partial_edge_box_does_not_drive_control(self):
         tracker = CentroidTracker()
         tracker.update([((220, 120, 90, 210), 0.9)], (480, 640, 3))
