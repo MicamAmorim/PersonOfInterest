@@ -14,6 +14,7 @@ class VisionTrackerTests(unittest.TestCase):
         self.assertEqual(len(second), 1)
         self.assertEqual(second[0].id, track_id)
         self.assertGreaterEqual(second[0].hits, 2)
+        self.assertTrue(second[0].control_valid)
 
     def test_far_detection_creates_another_track(self):
         tracker = CentroidTracker()
@@ -21,6 +22,29 @@ class VisionTrackerTests(unittest.TestCase):
         tracks = tracker.update([((500, 200, 70, 160), 0.8)], (480, 640, 3))
         self.assertGreaterEqual(len(tracks), 1)
         self.assertTrue(any(t.id != 1 for t in tracks))
+
+    def test_partial_edge_box_does_not_drive_control(self):
+        tracker = CentroidTracker()
+        tracker.update([((220, 120, 90, 210), 0.9)], (480, 640, 3))
+        stable = tracker.update([((224, 122, 90, 208), 0.9)], (480, 640, 3))[0]
+        self.assertTrue(stable.control_valid)
+        previous_center = (stable.smooth_cx, stable.smooth_cy)
+
+        partial = tracker.update([((250, 430, 70, 50), 0.55)], (480, 640, 3))[0]
+        self.assertFalse(partial.control_valid)
+        self.assertEqual((partial.smooth_cx, partial.smooth_cy), previous_center)
+
+    def test_large_geometry_jump_is_rejected_for_ptz(self):
+        tracker = CentroidTracker()
+        tracker.update([((200, 100, 100, 220), 0.9)], (480, 640, 3))
+        stable = tracker.update([((205, 104, 100, 220), 0.9)], (480, 640, 3))[0]
+        self.assertTrue(stable.control_valid)
+        center = (stable.smooth_cx, stable.smooth_cy)
+
+        jumped = tracker.update([((420, 20, 30, 60), 0.5)], (480, 640, 3))
+        original = next(track for track in jumped if track.id == stable.id)
+        self.assertFalse(original.control_valid)
+        self.assertEqual((original.smooth_cx, original.smooth_cy), center)
 
 
 if __name__ == "__main__":
