@@ -9,11 +9,22 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
 $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
+$PipExe = Join-Path $Root ".venv\Scripts\pip.exe"
 $Go2rtcExe = Join-Path $Root "bin\go2rtc.exe"
 $RuntimeConfig = Join-Path $Root "data\go2rtc.runtime.yaml"
 
 if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
+}
+
+Write-Host "Verificando dependencias da V2..." -ForegroundColor DarkGray
+& $PythonExe -c "import cv2, numpy" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Instalando dependencias de visao computacional..." -ForegroundColor Yellow
+    & $PipExe install -r (Join-Path $Root "backend\requirements.txt")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao instalar as dependencias da V2."
+    }
 }
 
 $env:DATA_DIR = Join-Path $Root "data"
@@ -35,7 +46,7 @@ log:
 '@
 [System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
 
-Write-Host "=== PersonOfInterest ===" -ForegroundColor Cyan
+Write-Host "=== PersonOfInterest V2 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", $RuntimeConfig) -WorkingDirectory $Root -PassThru -NoNewWindow
 
@@ -55,7 +66,7 @@ try {
         throw "go2rtc nao respondeu na porta 1984."
     }
 
-    Write-Host "Iniciando API e interface em http://localhost:8080 ..."
+    Write-Host "Iniciando API, timeline, visao e interface em http://localhost:8080 ..."
     $Backend = Start-Process -FilePath $PythonExe -ArgumentList @(
         "-m", "uvicorn", "app.main:app",
         "--app-dir", "backend",
@@ -64,7 +75,7 @@ try {
     ) -WorkingDirectory $Root -PassThru -NoNewWindow
 
     $backendReady = $false
-    for ($i = 0; $i -lt 40; $i++) {
+    for ($i = 0; $i -lt 60; $i++) {
         if ($Backend.HasExited) {
             throw "O backend encerrou durante a inicializacao."
         }
@@ -80,7 +91,7 @@ try {
         throw "O backend nao respondeu na porta 8080."
     }
 
-    Write-Host "PersonOfInterest online: http://localhost:8080" -ForegroundColor Green
+    Write-Host "PersonOfInterest V2 online: http://localhost:8080" -ForegroundColor Green
     Write-Host "Pressione Ctrl+C para encerrar." -ForegroundColor DarkGray
     if (-not $NoBrowser) {
         Start-Process "http://localhost:8080"
