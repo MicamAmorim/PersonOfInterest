@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from . import discovery, go2rtc, ptz
 from .alerts import manager as alert_manager
 from .api_v34 import router as v34_router
+from .assistant import manager as assistant_manager
+from .assistant_api import router as assistant_router
 from .body_identity import manager as body_identity_manager
 from .config import APP_NAME, APP_VERSION, DB_PATH, EVENTS_DIR, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
@@ -99,6 +101,7 @@ async def lifespan(_: FastAPI):
     identity_manager.start()
     body_identity_manager.start()
     alert_manager.start()
+    assistant_manager.start()
     with connection() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM cameras ORDER BY id").fetchall()]
     for camera_id in ids:
@@ -109,6 +112,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        assistant_manager.stop()
         alert_manager.stop()
         body_identity_manager.stop()
         identity_manager.stop()
@@ -117,6 +121,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
 app.include_router(v34_router)
+app.include_router(assistant_router)
 
 
 @app.get("/api/health")
@@ -134,6 +139,8 @@ async def health() -> dict:
         "body_reid_error": body_identity_manager.error,
         "alerts": alert_manager.status,
         "alerts_error": alert_manager.error,
+        "assistant": assistant_manager.status,
+        "assistant_error": assistant_manager.error,
     }
 
 
