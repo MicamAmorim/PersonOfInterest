@@ -5,16 +5,16 @@ from backend.app.ptz import direction_from_vector, sofia_hash
 
 class PTZDirectionTests(unittest.TestCase):
     def test_cardinal_directions(self):
-        self.assertEqual(direction_from_vector(1, 0), "DirectionRight")
-        self.assertEqual(direction_from_vector(-1, 0), "DirectionLeft")
+        self.assertEqual(direction_from_vector(1, 0), "DirectionLeft")
+        self.assertEqual(direction_from_vector(-1, 0), "DirectionRight")
         self.assertEqual(direction_from_vector(0, 1), "DirectionUp")
         self.assertEqual(direction_from_vector(0, -1), "DirectionDown")
 
     def test_diagonal_directions(self):
-        self.assertEqual(direction_from_vector(1, 1), "DirectionRightUp")
-        self.assertEqual(direction_from_vector(1, -1), "DirectionRightDown")
-        self.assertEqual(direction_from_vector(-1, 1), "DirectionLeftUp")
-        self.assertEqual(direction_from_vector(-1, -1), "DirectionLeftDown")
+        self.assertEqual(direction_from_vector(1, 1), "DirectionLeftUp")
+        self.assertEqual(direction_from_vector(1, -1), "DirectionLeftDown")
+        self.assertEqual(direction_from_vector(-1, 1), "DirectionRightUp")
+        self.assertEqual(direction_from_vector(-1, -1), "DirectionRightDown")
 
     def test_deadzone(self):
         self.assertIsNone(direction_from_vector(0.05, -0.05))
