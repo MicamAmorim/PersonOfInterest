@@ -1,4 +1,4 @@
-const CACHE = 'personofinterest-v4.0';
+const CACHE = 'personofinterest-v4.0.1';
 const SHELL = ['/', '/styles.css', '/v2.css', '/v34.css', '/app-core.js', '/app-runtime.js', '/v34.js', '/camera-webrtc.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -39,9 +39,10 @@ self.addEventListener('push', (event) => {
     renotify: true,
     data: { url: data.url || '/', event_id: data.event_id || null },
   };
+  if (data.image) options.image = data.image;
   event.waitUntil(Promise.all([
     self.registration.showNotification(title, options),
-    self.registration.setAppBadge ? self.registration.setAppBadge() : Promise.resolve(),
+    self.navigator?.setAppBadge ? self.navigator.setAppBadge() : Promise.resolve(),
   ]));
 });
 
