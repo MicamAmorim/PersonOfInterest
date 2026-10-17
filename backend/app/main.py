@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import discovery, go2rtc, ptz
 from .alerts import manager as alert_manager
 from .api_v34 import router as v34_router
+from .body_identity import manager as body_identity_manager
 from .config import APP_NAME, APP_VERSION, DB_PATH, EVENTS_DIR, FRONTEND_DIR, GO2RTC_BROWSER_BASE
 from .db import connection, init_db, utc_now
 from .identity import manager as identity_manager
@@ -96,6 +97,7 @@ async def sync_camera(camera_id: int) -> CameraOut:
 async def lifespan(_: FastAPI):
     init_db()
     identity_manager.start()
+    body_identity_manager.start()
     alert_manager.start()
     with connection() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM cameras ORDER BY id").fetchall()]
@@ -108,6 +110,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         alert_manager.stop()
+        body_identity_manager.stop()
         identity_manager.stop()
         vision_manager.stop_all()
 
@@ -127,6 +130,8 @@ async def health() -> dict:
         "vision_error": vision_manager.import_error,
         "identity": identity_manager.status,
         "identity_error": identity_manager.error,
+        "body_reid": body_identity_manager.status,
+        "body_reid_error": body_identity_manager.error,
         "alerts": alert_manager.status,
         "alerts_error": alert_manager.error,
     }
@@ -348,8 +353,13 @@ def assign_event_person(event_id: int, payload: EventPersonAssignRequest) -> dic
             person = conn.execute("SELECT id, name FROM persons WHERE id = ?", (payload.person_id,)).fetchone()
             if person is None:
                 raise HTTPException(status_code=404, detail="Pessoa não encontrada")
-        conn.execute("UPDATE events SET person_id = ? WHERE id = ?", (payload.person_id, event_id))
+        conn.execute(
+            "UPDATE events SET person_id = ?, probable_person_id = NULL, body_confidence = NULL, body_identity_source = NULL WHERE id = ?",
+            (payload.person_id, event_id),
+        )
         conn.commit()
+    if payload.person_id is not None:
+        body_identity_manager.confirm_event_identity(event_id, payload.person_id)
     return {"ok": True, "event_id": event_id, "person_id": payload.person_id}
 
 
@@ -364,18 +374,19 @@ def list_events(
     limit: int = Query(default=120, ge=1, le=500),
 ) -> list[dict]:
     sql = """SELECT e.*, c.name AS camera_name, c.location AS camera_location,
-        p.name AS person_name
+        p.name AS person_name, pp.name AS probable_person_name
         FROM events e
         JOIN cameras c ON c.id = e.camera_id
-        LEFT JOIN persons p ON p.id = e.person_id"""
+        LEFT JOIN persons p ON p.id = e.person_id
+        LEFT JOIN persons pp ON pp.id = e.probable_person_id"""
     where: list[str] = []
     params: list[object] = []
     if camera_id is not None:
         where.append("e.camera_id = ?")
         params.append(camera_id)
     if person_id is not None:
-        where.append("e.person_id = ?")
-        params.append(person_id)
+        where.append("(e.person_id = ? OR (e.person_id IS NULL AND e.probable_person_id = ?))")
+        params.extend([person_id, person_id])
     elif unidentified:
         where.append("e.person_id IS NULL")
     if from_ts:
@@ -398,6 +409,8 @@ def list_events(
             "id": row["id"], "camera_id": row["camera_id"], "camera_name": row["camera_name"],
             "camera_location": row["camera_location"], "track_id": row["track_id"], "event_type": row["event_type"],
             "person_id": row["person_id"], "person_name": row["person_name"],
+            "probable_person_id": row["probable_person_id"], "probable_person_name": row["probable_person_name"],
+            "body_confidence": row["body_confidence"], "body_identity_source": row["body_identity_source"],
             "unknown_cluster_id": row["unknown_cluster_id"], "identity_state": row["identity_state"],
             "identity_confidence": row["identity_confidence"],
             "has_face": bool(row["has_face"]), "face_count": row["face_count"], "confidence": row["confidence"],
