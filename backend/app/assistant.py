@@ -303,6 +303,7 @@ class AssistantManager:
 
     def _handle_event(self, event: dict[str, Any]) -> None:
         event_id = int(event["id"])
+        camera_id = int(event["camera_id"])
         state = str(event.get("identity_state") or "")
         if state == "false_positive":
             self._mark_event(event_id, "false_positive")
@@ -335,7 +336,6 @@ class AssistantManager:
                 subject_key = f"person:{int(event['probable_person_id'])}"
                 name = str(event["probable_person_name"])
             elif state in {"no_face", "missing_snapshot"} and self._event_age_seconds(event) < ASSISTANT_SETTLE_SECONDS:
-                # Give body ReID a short window after face indexing concludes.
                 return
             else:
                 self._mark_event(event_id, "no_greeting_candidate")
@@ -344,6 +344,9 @@ class AssistantManager:
         if not subject_key:
             self._mark_event(event_id, "no_subject")
             return
+        # Cooldowns and first-of-turn greetings are local to each speaking camera.
+        # Known and probable evidence for the same person still share one subject.
+        subject_key = f"camera:{camera_id}:{subject_key}"
 
         timezone_name = str(event.get("timezone") or DEFAULT_TIMEZONE)
         try:
@@ -390,7 +393,7 @@ class AssistantManager:
             status = "spoken"
             error = None
             self.last_speech = {
-                "camera_id": int(event["camera_id"]),
+                "camera_id": camera_id,
                 "camera_name": event.get("camera_name"),
                 "event_id": event_id,
                 "text": text,
@@ -409,7 +412,7 @@ class AssistantManager:
                     local_date, daypart, status, error, spoken_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    int(event["camera_id"]), event_id, subject_key, certainty, kind, text,
+                    camera_id, event_id, subject_key, certainty, kind, text,
                     local_date, daypart, status, error, utc_now(),
                 ),
             )
