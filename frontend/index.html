@@ -75,7 +75,7 @@
 
       <section id="settingsView" class="view">
         <div class="settings-grid">
-          <article class="panel info-panel"><p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2><div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div><div class="info-row"><span>Streaming</span><strong>go2rtc + WebRTC proxy</strong></div><div class="info-row"><span>Visão</span><strong>YOLOX + YuNet + SFace</strong></div><div class="info-row"><span>PTZ</span><strong>DVRIP / ONVIF fallback</strong></div></article>
+          <article class="panel info-panel"><p class="eyebrow">ARQUITETURA</p><h2>Serviços</h2><div class="info-row"><span>API</span><strong>FastAPI + SQLite</strong></div><div class="info-row"><span>Streaming</span><strong>go2rtc + WebRTC/MSE proxy</strong></div><div class="info-row"><span>Visão</span><strong>YOLOX + YuNet + SFace</strong></div><div class="info-row"><span>PTZ</span><strong>DVRIP / ONVIF fallback</strong></div></article>
           <article class="panel info-panel"><p class="eyebrow">V4</p><h2>Local-first + PWA</h2><p class="muted paragraph">Detecção, tracking, identidade por embeddings, clusters de desconhecidos, Web Push e regras locais. O app continua armazenando câmeras, rostos, embeddings e histórico no computador local.</p><button class="button ghost" id="syncAllBtn">Sincronizar câmeras</button></article>
         </div>
       </section>
@@ -139,5 +139,6 @@
   <script src="/app-core.js" defer></script>
   <script src="/app-runtime.js" defer></script>
   <script src="/v34.js" defer></script>
+  <script src="/v4-stream-fix.js" defer></script>
 </body>
 </html>
