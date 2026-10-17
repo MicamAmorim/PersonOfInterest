@@ -1,0 +1,1 @@
+PNG icons are committed as binary blobs for Android/iOS PWA installation.
