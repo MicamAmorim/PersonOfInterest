@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local data / secrets
+.env
+data/*
+!data/.gitkeep
+infra/go2rtc/go2rtc.yaml.bak
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
