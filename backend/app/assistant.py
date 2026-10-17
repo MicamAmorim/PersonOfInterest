@@ -307,10 +307,9 @@ class AssistantManager:
         if state == "false_positive":
             self._mark_event(event_id, "false_positive")
             return
+        # Identity owns certainty. Never discard an event merely because face/body
+        # indexing is temporarily slow; leave it unconsumed and revisit next poll.
         if state == "pending":
-            if self._event_age_seconds(event) < ASSISTANT_SETTLE_SECONDS:
-                return
-            self._mark_event(event_id, "identity_timeout")
             return
 
         certainty: str | None = None
@@ -336,6 +335,7 @@ class AssistantManager:
                 subject_key = f"person:{int(event['probable_person_id'])}"
                 name = str(event["probable_person_name"])
             elif state in {"no_face", "missing_snapshot"} and self._event_age_seconds(event) < ASSISTANT_SETTLE_SECONDS:
+                # Give body ReID a short window after face indexing concludes.
                 return
             else:
                 self._mark_event(event_id, "no_greeting_candidate")
