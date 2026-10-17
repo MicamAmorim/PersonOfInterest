@@ -1,23 +1,24 @@
 # PersonOfInterest
 
-Local-first IP camera dashboard. V1 establishes the NVR foundation: RTSP camera registration, persistent SQLite configuration, go2rtc streaming and a responsive installable PWA. **Windows native is the primary development path; Docker is optional.**
+Local-first IP camera surveillance app. V1 established the NVR foundation; **V2 adds local computer vision, person tracking, face detection, event snapshots/timeline and optional PTZ auto-follow**. Windows native remains the primary development path; Docker is optional.
 
-> Facial recognition, identity clustering, event history and push notifications are deliberately left for later versions. V1 builds the stable camera/streaming base first.
+## V2
 
-## V1
+- FastAPI + SQLite backend
+- RTSP camera registration and local discovery
+- go2rtc live streaming
+- Local person detection with OpenCV
+- Per-camera tracking IDs
+- Frontal-face detection associated with tracked people
+- Event snapshots stored under `data/events/`
+- Timeline filtered by camera
+- Live tracking boxes over the selected camera
+- Optional **Acompanhar pessoa** mode: select a tracked person or let the app follow the most prominent person
+- Semi-transparent PTZ joystick in the lower-right corner of the expanded camera viewer
+- PTZ control through ONVIF when supported by the camera
+- Responsive installable PWA
 
-- FastAPI backend
-- Persistent SQLite database
-- Add, edit, enable/disable, re-sync and delete cameras
-- Local camera discovery (RTSP :554 / ONVIF :8899)
-- Credential prompt + real RTSP DESCRIBE test before saving a discovered camera
-- RTSP credentials remain local and are masked in API responses
-- go2rtc stream synchronization
-- WebRTC playback with MSE/MP4/MJPEG fallbacks
-- Responsive PWA for desktop and mobile
-- Native Windows setup/start scripts
-- Docker Compose remains available as an optional deployment
-- Backend/database/go2rtc health status
+> V3 remains responsible for identity: face embeddings, known/unknown matching, clustering and retroactive person naming.
 
 ## Quick start — Windows, no Docker
 
@@ -30,99 +31,91 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 powershell -ExecutionPolicy Bypass -File .\start.ps1
 ```
 
-`setup.ps1` creates `.venv`, installs the Python dependencies and downloads the official 64-bit Windows build of go2rtc into `bin/`. The go2rtc project publishes `go2rtc_win64.zip` for Windows 10+ 64-bit.
+On an existing V1 installation, update and start normally:
 
-After startup the browser opens automatically at:
+```powershell
+git pull
+.\start.ps1
+```
+
+`start.ps1` checks for the new OpenCV/Numpy V2 dependencies and installs them from `backend/requirements.txt` if needed.
+
+Open:
 
 ```text
 http://localhost:8080
 ```
 
-### Discover cameras automatically
+## Camera discovery
 
-Click **Descobrir câmeras**. PersonOfInterest scans only the computer's local `/24` subnet and surfaces devices that expose RTSP (`554`) or ONVIF (`8899`). Selecting a device first attempts RTSP without credentials; if the camera requires authentication, the UI asks for the device username/password, performs a real RTSP `DESCRIBE`, discovers the supported iCSee-style `/live/ch00_0` or `/live/ch00_1` path, and enables **Adicionar câmera** only after the probe succeeds.
+Click **Descobrir câmeras**. PersonOfInterest scans only the computer's local `/24` subnet and surfaces devices exposing RTSP (`554`) or ONVIF (`8899`). It tests a real RTSP `DESCRIBE` before allowing a discovered camera to be saved.
 
-Discovery does not send or store credentials until you explicitly add the camera. Once saved, the RTSP URL is persisted only in the local SQLite database and API responses mask its credentials.
+Credentials remain local. The original RTSP URL is stored only in SQLite and API responses mask its credentials.
 
-To start later, only run:
-
-```powershell
-.\start.ps1
-```
-
-To start without opening the browser:
-
-```powershell
-.\start.ps1 -NoBrowser
-```
-
-Press **Ctrl+C** in the PowerShell window to stop the backend and go2rtc.
-
-The SQLite database is stored at `data/person_of_interest.db` and is ignored by Git.
-
-### PowerShell execution policy
-
-If Windows blocks local scripts, either use the `powershell -ExecutionPolicy Bypass -File ...` commands above or, for the current terminal only:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-## Add a camera
-
-Open **Nova câmera** and paste the camera RTSP address, for example:
+## Vision pipeline
 
 ```text
-rtsp://user:password@192.168.1.50:554/stream1
+Camera RTSP
+   |
+   +--> go2rtc --> browser live view
+   |
+   +--> OpenCV worker
+          |
+          +--> person detector
+          +--> centroid/IoU tracker
+          +--> face detector
+          +--> event snapshot
+          +--> SQLite timeline
+          +--> optional PTZ auto-follow
 ```
 
-The RTSP path varies by manufacturer and model. After saving, PersonOfInterest never returns the original credentials through its API; the UI only sees a masked form such as `rtsp://***:***@192.168.1.50:554/stream1`.
+The current V2 detector is intentionally lightweight and CPU-friendly so the system runs without CUDA. It is an interchangeable component; a YOLO/ONNX detector can replace it later without changing the event/timeline model.
 
-In native mode go2rtc listens on `1984/TCP` and WebRTC uses `8555/TCP+UDP`. The backend/PWA listens on `8080/TCP`.
+## Tracking and auto-follow
 
-## Architecture
+Open a camera. Detected people appear as boxes with IDs (`#1`, `#2`, ...). Clicking a box selects that track. Enable **Acompanhar pessoa** to let the camera keep the selected person near the image center. If no track is selected, the largest visible person is used.
+
+Auto-follow uses a dead zone and movement cooldown so the camera does not continuously oscillate around the center.
+
+Manual PTZ always remains available through the small joystick in the lower-right corner of the expanded video. Starting manual joystick movement disables auto-follow for that moment.
+
+## Timeline
+
+The **Timeline** view shows saved person events with camera, timestamp, tracking ID, face-detected indicator and snapshot.
+
+Data is stored locally:
 
 ```text
-IP cameras (RTSP)
-        |
-        v
-     go2rtc <----- FastAPI ----- SQLite
-        |              |
-        |              v
-        +--------> Browser / PWA
-                    :8080
+data/person_of_interest.db
+data/events/YYYY-MM-DD/<camera-id>/...
 ```
 
-The browser loads the PersonOfInterest UI from FastAPI on port `8080`; camera playback is served by the local go2rtc process on port `1984`.
+## PTZ compatibility
+
+The V2 PTZ layer first uses standard ONVIF capabilities/profile discovery and `ContinuousMove`/`Stop`. Many iCSee/XMEye/Xiongmai cameras expose ONVIF on port `8899`, but firmware compatibility varies. The UI reports PTZ availability per camera; vendor-specific DVRIP/Sofia fallback can be added for devices whose video works while ONVIF PTZ is incomplete.
+
+## Ports
+
+Native mode:
+
+```text
+8080/tcp       PersonOfInterest API + PWA
+1984/tcp       go2rtc API/player
+8554/tcp       go2rtc local RTSP
+8555/tcp+udp   WebRTC
+```
 
 ## Optional Docker mode
 
-Docker is not required. It remains available for reproducible deployments:
+Docker is not required:
 
 ```powershell
 docker compose up -d --build
 ```
 
-Then open `http://localhost:8080`. Docker mode uses Caddy as a same-origin proxy and keeps go2rtc internal except for WebRTC media ports.
-
 ## Tailscale
 
-The intended remote-access model is a trusted LAN/tailnet, not public port-forwarding. Native LAN access works by using the machine's IP instead of `localhost`. Before treating remote PWA access as production-ready, the native mode will gain the same-origin HTTPS proxy used for Tailscale/Web Push; that is intentionally separate from this first local V1 test.
-
-## Project layout
-
-```text
-backend/             FastAPI + SQLite + go2rtc integration
-frontend/            installable responsive PWA
-infra/go2rtc/        go2rtc configuration
-bin/                 local go2rtc executable (ignored by Git)
-data/                local SQLite data (ignored by Git)
-setup.ps1             one-time Windows bootstrap
-start.ps1             native Windows launcher
-Caddyfile             Docker same-origin gateway
-docker-compose.yml    optional container stack
-tests/                backend unit tests
-```
+The intended remote-access model is a trusted LAN/tailnet, not public port-forwarding. For external access use Tailscale rather than exposing the camera or PersonOfInterest ports directly to the public internet.
 
 ## Validation
 
@@ -131,9 +124,19 @@ tests/                backend unit tests
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## Roadmap
+Frontend syntax is also checked in CI with `node --check`.
 
-**V2 — vision events:** person detection/tracking, useful-face detection, snapshots and event timeline.
+## Branches
+
+Before starting V2, the stable V1 state was preserved at:
+
+```text
+backup/v1-stable-2026-10-17
+```
+
+Development work was staged on `v2-work` before promotion to `main`.
+
+## Roadmap
 
 **V3 — identity:** local face embeddings, known/unknown matching, unknown clustering and the “Who is this?” classification flow with retroactive identity assignment.
 
@@ -141,4 +144,4 @@ tests/                backend unit tests
 
 ## Security
 
-PersonOfInterest will ultimately contain sensitive surveillance and biometric information. Keep it on trusted infrastructure, use strong camera credentials, keep `data/` out of source control and back up the local database securely.
+PersonOfInterest stores surveillance data and will later store biometric identifiers. Keep it on trusted infrastructure, use strong camera credentials, keep `data/` out of source control and back up the local database securely.
