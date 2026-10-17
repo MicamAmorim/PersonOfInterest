@@ -109,7 +109,10 @@ function renderVisionOverlay(vision) {
   overlay.innerHTML = tracks.map(track => {
     const b = track.bbox;
     const selected = Number(track.track_id) === Number(state.viewer.selectedTrackId);
-    return `<button class="track-box ${selected ? 'selected' : ''} ${track.has_face ? 'face' : ''}" data-track-id="${track.track_id}" style="left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%"><span>#${track.track_id}${track.has_face ? ' · face' : ''}</span></button>`;
+    const stable = track.control_valid !== false;
+    const cls = `${selected ? 'selected' : ''} ${track.has_face ? 'face' : ''} ${stable ? '' : 'unstable'}`;
+    const suffix = stable ? '' : ' · aguardando';
+    return `<button class="track-box ${cls}" title="${escapeHtml(track.control_reason || '')}" data-track-id="${track.track_id}" style="left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%"><span>#${track.track_id}${track.has_face ? ' · face' : ''}${suffix}</span></button>`;
   }).join('');
   $$('[data-track-id]').forEach(el => el.addEventListener('click', async (event) => {
     event.stopPropagation();
@@ -131,6 +134,12 @@ async function pollVision() {
     $('#visionStatus').textContent = `Visão: ${status}${vision.error ? ` · ${vision.error}` : ''}`;
     $('#autoFollowToggle').checked = Boolean(vision.auto_follow_enabled);
     if (vision.selected_track_id && !state.viewer.selectedTrackId) state.viewer.selectedTrackId = vision.selected_track_id;
+    $('#homeStatus').textContent = vision.home_preset_set ? 'Home definido' : 'Home não definido';
+    if (vision.auto_follow_enabled && vision.target_lost_seconds > 0) {
+      $('#trackHint').textContent = vision.target_lost_seconds >= 3
+        ? 'Alvo perdido: retornando à posição Home.'
+        : `Alvo temporariamente perdido (${vision.target_lost_seconds.toFixed(1)} s / 3 s).`;
+    }
     if (vision.ptz_error) $('#ptzStatus').textContent = `PTZ: ${vision.ptz_error}`;
   } catch (error) {
     $('#visionStatus').textContent = `Visão: ${error.message}`;
@@ -158,12 +167,38 @@ async function checkPTZ(cameraId) {
   try {
     const result = await api(`/api/cameras/${cameraId}/ptz/status`);
     state.viewer.ptzReady = Boolean(result.ok);
-    $('#ptzStatus').textContent = result.ok ? 'PTZ: ONVIF pronto' : `PTZ: ${result.error || 'indisponível'}`;
+    const protocol = result.protocol ? result.protocol.toUpperCase() : 'PTZ';
+    $('#ptzStatus').textContent = result.ok ? `PTZ: ${protocol} pronto` : `PTZ: ${result.error || 'indisponível'}`;
+    $('#homeStatus').textContent = result.home_preset_set ? 'Home definido' : 'Home não definido';
     $('#ptzJoystick').classList.toggle('unavailable', !result.ok);
+    $('#setHomeBtn').disabled = !result.ok;
+    $('#gotoHomeBtn').disabled = !result.ok || !result.home_preset_set;
   } catch (error) {
     $('#ptzStatus').textContent = `PTZ: ${error.message}`;
     $('#ptzJoystick').classList.add('unavailable');
   }
+}
+
+async function setHomePosition() {
+  const cameraId = state.viewer.cameraId;
+  if (!cameraId) return;
+  if (!confirm('Usar a posição atual da câmera como posição inicial (Home)?')) return;
+  try {
+    await api(`/api/cameras/${cameraId}/ptz/home/set`, { method: 'POST', body: '{}' });
+    $('#homeStatus').textContent = 'Home definido';
+    $('#gotoHomeBtn').disabled = false;
+    toast('Posição inicial salva na câmera.');
+  } catch (error) { toast(`Home: ${error.message}`, 'error'); }
+}
+
+async function gotoHomePosition() {
+  const cameraId = state.viewer.cameraId;
+  if (!cameraId) return;
+  try {
+    if ($('#autoFollowToggle').checked) await setAutoFollow(false);
+    await api(`/api/cameras/${cameraId}/ptz/home/goto`, { method: 'POST', body: '{}' });
+    toast('Retornando à posição inicial.');
+  } catch (error) { toast(`Home: ${error.message}`, 'error'); }
 }
 
 function openViewer(id) {
@@ -219,7 +254,7 @@ async function sendJoystick(event) {
   if (now - joystickLastSend < 180 || v.mag < 0.15) return;
   joystickLastSend = now;
   try {
-    await api(`/api/cameras/${state.viewer.cameraId}/ptz/move`, { method: 'POST', body: JSON.stringify({ pan: v.pan, tilt: v.tilt, speed: Math.max(.25, v.mag * .72), duration: .3 }) });
+    await api(`/api/cameras/${state.viewer.cameraId}/ptz/move`, { method: 'POST', body: JSON.stringify({ pan: v.pan, tilt: v.tilt, speed: Math.max(.22, v.mag * .58), duration: .24 }) });
   } catch (error) { $('#ptzStatus').textContent = `PTZ: ${error.message}`; }
 }
 
@@ -240,6 +275,7 @@ $('#emptyAddBtn').addEventListener('click', () => openCameraDialog());
 $('#refreshBtn').addEventListener('click', () => Promise.all([loadCameras(), loadHealth(), loadEvents()]));
 $('#syncAllBtn').addEventListener('click', syncAll);
 $('#timelineRefresh').addEventListener('click', loadEvents);
+$('#timelineDeleteAll').addEventListener('click', deleteAllTimelineEvents);
 $('#timelineCamera').addEventListener('change', loadEvents);
 $('#cameraForm').addEventListener('submit', saveCamera);
 $('#backToDiscoveryBtn').addEventListener('click', backToDiscovery);
@@ -253,6 +289,8 @@ $$('[data-close]').forEach(el => el.addEventListener('click', () => $('#cameraDi
 $('[data-viewer-close]').addEventListener('click', closeViewer);
 $('#viewerDialog').addEventListener('cancel', (event) => { event.preventDefault(); closeViewer(); });
 $('#autoFollowToggle').addEventListener('change', (event) => setAutoFollow(event.target.checked));
+$('#setHomeBtn').addEventListener('click', setHomePosition);
+$('#gotoHomeBtn').addEventListener('click', gotoHomePosition);
 
 $('#ptzJoystick').addEventListener('pointerdown', async (event) => {
   if (!state.viewer.ptzReady) return;
