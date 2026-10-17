@@ -4,7 +4,6 @@ import asyncio
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
@@ -80,7 +79,12 @@ async def sync_camera(camera_id: int) -> CameraOut:
     result = await asyncio.to_thread(go2rtc.upsert_stream, row["stream_name"], row["rtsp_url"])
     if result.ok:
         set_sync_state(camera_id, "ok")
-        vision_manager.start_camera(camera_id, row["rtsp_url"], row["name"])
+        vision_manager.start_camera(
+            camera_id,
+            row["rtsp_url"],
+            row["stream_name"],
+            row["name"],
+        )
     else:
         set_sync_state(camera_id, "error", result.error)
     return camera_row_to_out(get_camera_row(camera_id))
@@ -255,7 +259,14 @@ async def ptz_status(camera_id: int) -> dict:
 async def ptz_move(camera_id: int, payload: PTZMoveRequest) -> dict:
     row = get_camera_row(camera_id)
     try:
-        await asyncio.to_thread(ptz.pulse, row["rtsp_url"], payload.pan, payload.tilt, payload.speed, payload.duration)
+        await asyncio.to_thread(
+            ptz.pulse,
+            row["rtsp_url"],
+            payload.pan,
+            payload.tilt,
+            payload.speed,
+            payload.duration,
+        )
         vision_manager.set_ptz_error(camera_id, None)
         return {"ok": True}
     except Exception as exc:
@@ -274,7 +285,10 @@ async def ptz_stop(camera_id: int) -> dict:
 
 
 @app.get("/api/events")
-def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=1, le=500)) -> list[dict]:
+def list_events(
+    camera_id: int | None = None,
+    limit: int = Query(default=80, ge=1, le=500),
+) -> list[dict]:
     sql = """
         SELECT e.*, c.name AS camera_name, c.location AS camera_location
         FROM events e JOIN cameras c ON c.id = e.camera_id
@@ -285,8 +299,10 @@ def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=
         params.append(camera_id)
     sql += " ORDER BY e.created_at DESC LIMIT ?"
     params.append(limit)
+
     with connection() as conn:
         rows = conn.execute(sql, params).fetchall()
+
     return [
         {
             "id": row["id"],
@@ -299,7 +315,9 @@ def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=
             "face_count": row["face_count"],
             "confidence": row["confidence"],
             "created_at": row["created_at"],
-            "snapshot_url": f"/api/events/{row['id']}/snapshot" if row["snapshot_path"] else None,
+            "snapshot_url": (
+                f"/api/events/{row['id']}/snapshot" if row["snapshot_path"] else None
+            ),
         }
         for row in rows
     ]
@@ -308,13 +326,21 @@ def list_events(camera_id: int | None = None, limit: int = Query(default=80, ge=
 @app.get("/api/events/{event_id}/snapshot")
 def event_snapshot(event_id: int) -> FileResponse:
     with connection() as conn:
-        row = conn.execute("SELECT snapshot_path FROM events WHERE id = ?", (event_id,)).fetchone()
+        row = conn.execute(
+            "SELECT snapshot_path FROM events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
     if row is None or not row["snapshot_path"]:
         raise HTTPException(status_code=404, detail="Snapshot não encontrado")
+
     path = (EVENTS_DIR / row["snapshot_path"]).resolve()
     if EVENTS_DIR.resolve() not in path.parents or not path.is_file():
         raise HTTPException(status_code=404, detail="Snapshot não encontrado")
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 if FRONTEND_DIR.exists():
@@ -324,11 +350,18 @@ if FRONTEND_DIR.exists():
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
     def manifest() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+        return FileResponse(
+            FRONTEND_DIR / "manifest.webmanifest",
+            media_type="application/manifest+json",
+        )
 
     @app.get("/sw.js", include_in_schema=False)
     def service_worker() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "sw.js", media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
+        return FileResponse(
+            FRONTEND_DIR / "sw.js",
+            media_type="application/javascript",
+            headers={"Service-Worker-Allowed": "/"},
+        )
 
     @app.get("/icon.svg", include_in_schema=False)
     def icon() -> FileResponse:
