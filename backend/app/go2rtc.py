@@ -7,7 +7,6 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from . import discovery
 from .config import GO2RTC_API_URL
 
 
@@ -75,34 +74,11 @@ def local_restream_url(stream_name: str) -> str:
     return f"rtsp://127.0.0.1:8554/{urllib.parse.quote(stream_name, safe='')}"
 
 
-def _anonymous_rtsp_url(rtsp_url: str) -> str | None:
-    """Return the same RTSP endpoint without userinfo.
-
-    Some inexpensive iCSee/XMEye firmwares expose RTSP anonymously even though
-    the mobile app/PTZ interface uses credentials. Supplying userinfo to such a
-    firmware can paradoxically be rejected as wrong user/pass. Keep credentials
-    in SQLite for PTZ/DVRIP, but allow the video transport itself to be anonymous.
-    """
-    try:
-        parsed = urllib.parse.urlsplit(rtsp_url)
-        if parsed.scheme.lower() != "rtsp" or not parsed.hostname:
-            return None
-        host = parsed.hostname
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
-        netloc = host
-        if parsed.port:
-            netloc = f"{netloc}:{parsed.port}"
-        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
-    except Exception:
-        return None
-
-
 def dvrip_backchannel_url(rtsp_url: str) -> str | None:
     """Build an iCSee/XMEye DVRIP audio backchannel source when credentials exist.
 
     RTSP credentials are not guaranteed to be accepted by DVRIP on every iCSee
-    firmware, so this URL is deliberately isolated from the primary stream.
+    firmware, so DVRIP is deliberately isolated from the primary video stream.
     """
     try:
         parsed = urllib.parse.urlsplit(rtsp_url)
@@ -117,90 +93,38 @@ def dvrip_backchannel_url(rtsp_url: str) -> str | None:
         return None
 
 
-def _probe_exact_rtsp(rtsp_url: str) -> Go2RTCResult:
-    try:
-        parsed = urllib.parse.urlsplit(rtsp_url)
-        if parsed.scheme.lower() != "rtsp" or not parsed.hostname:
-            return Go2RTCResult(False, "URL RTSP inválida")
-        port = int(parsed.port or 554)
-        username = urllib.parse.unquote(parsed.username or "")
-        password = urllib.parse.unquote(parsed.password or "")
-        path = parsed.path or "/"
-        if parsed.query:
-            path = f"{path}?{parsed.query}"
-        result = discovery.probe_rtsp(
-            parsed.hostname,
-            username=username,
-            password=password,
-            port=port,
-            paths=(path,),
-        )
-        if result.ok:
-            return Go2RTCResult(True, effective_url=rtsp_url)
-        if result.status_code == 401:
-            return Go2RTCResult(False, "RTSP: usuário ou senha recusados pela câmera")
-        return Go2RTCResult(False, f"RTSP: {result.error or 'não foi possível abrir o stream'}")
-    except Exception as exc:
-        return Go2RTCResult(False, f"RTSP: falha ao validar o stream ({exc})")
-
-
-def _validate_primary_rtsp(rtsp_url: str) -> Go2RTCResult:
-    """Validate configured RTSP and transparently try anonymous video fallback."""
-    configured = _probe_exact_rtsp(rtsp_url)
-    if configured.ok:
-        return configured
-
-    try:
-        parsed = urllib.parse.urlsplit(rtsp_url)
-        has_userinfo = parsed.username is not None or parsed.password is not None
-    except Exception:
-        has_userinfo = False
-
-    if has_userinfo:
-        anonymous_url = _anonymous_rtsp_url(rtsp_url)
-        if anonymous_url and anonymous_url != rtsp_url:
-            anonymous = _probe_exact_rtsp(anonymous_url)
-            if anonymous.ok:
-                return Go2RTCResult(
-                    True,
-                    effective_url=anonymous_url,
-                    warning="RTSP de vídeo aceito sem autenticação; credenciais cadastradas foram mantidas para PTZ/talkback.",
-                )
-
-    return configured
-
-
 def upsert_stream(
     stream_name: str,
     rtsp_url: str,
     extra_sources: Sequence[str] | None = None,
 ) -> Go2RTCResult:
-    # Dedicated *_talkback streams are the only streams allowed to use extra
-    # DVRIP sources. An optional talkback failure must never poison video.
-    is_talkback = stream_name.endswith("_talkback")
-    effective_url = rtsp_url
-    warning: str | None = None
-    if not is_talkback:
-        validation = _validate_primary_rtsp(rtsp_url)
-        if not validation.ok:
-            _drop_stream_quietly(stream_name)
-            _drop_stream_quietly(talkback_stream_name(stream_name))
-            return validation
-        effective_url = validation.effective_url or rtsp_url
-        warning = validation.warning
+    """Create/update a go2rtc stream without second-guessing camera RTSP auth.
 
-    sources = [effective_url]
+    go2rtc is the production RTSP client used by the application and supports a
+    wider range of camera-specific RTSP/Digest quirks than PersonOfInterest's
+    lightweight discovery probe. A custom preflight must therefore never block
+    a camera that go2rtc itself may be able to open.
+
+    Optional DVRIP sources are accepted only on the dedicated *_talkback stream
+    so talkback authentication failures cannot poison normal video/vision.
+    """
+    is_talkback = stream_name.endswith("_talkback")
+    sources = [rtsp_url]
     if is_talkback:
         for source in extra_sources or ():
             if source and source not in sources:
                 sources.append(source)
+
     try:
         _request("PUT", "/api/streams", {"name": stream_name, "src": sources})
-        return Go2RTCResult(ok=True, effective_url=effective_url, warning=warning)
+        return Go2RTCResult(ok=True, effective_url=rtsp_url)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip() or str(exc)
+        # go2rtc may have already created the in-memory stream even when writing
+        # its temporary YAML fails. PersonOfInterest persists camera config in
+        # SQLite, so an existing runtime stream is sufficient here.
         if _stream_exists(stream_name):
-            return Go2RTCResult(ok=True, effective_url=effective_url, warning=warning)
+            return Go2RTCResult(ok=True, effective_url=rtsp_url)
         return Go2RTCResult(ok=False, error=detail)
     except Exception as exc:
         return Go2RTCResult(ok=False, error=str(exc))
