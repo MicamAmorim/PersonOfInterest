@@ -1,12 +1,10 @@
 """PersonOfInterest backend package."""
 
-# Install runtime compatibility/safety patches before app.main imports the
-# singleton managers.
-from .body_reid_patch import install as _install_body_reid_patch
+# Keep ONVIF service discovery pinned to the camera host before app.main imports
+# the singleton managers. Body ReID compatibility now lives in body_identity.py
+# itself and no longer needs a runtime monkey-patch.
 from .ptz_safety_patch import install as _install_ptz_safety_patch
 
-_install_body_reid_patch()
 _install_ptz_safety_patch()
 
-del _install_body_reid_patch
 del _install_ptz_safety_patch
