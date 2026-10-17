@@ -4,7 +4,6 @@ import asyncio
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Response, status
@@ -87,14 +86,12 @@ async def sync_camera(camera_id: int) -> CameraOut:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    # Rebuild go2rtc runtime state from SQLite on every backend start.
     with connection() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM cameras ORDER BY id").fetchall()]
     for camera_id in ids:
         try:
             await sync_camera(camera_id)
         except Exception:
-            # Startup should not fail just because a camera or go2rtc is temporarily unavailable.
             pass
     yield
 
@@ -226,28 +223,34 @@ async def delete_camera(camera_id: int) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# Static PWA. API routes are declared first so they take precedence.
 if FRONTEND_DIR.exists():
     assets_dir = FRONTEND_DIR / "assets"
     if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=assets_diŠK˜[YOH˜\ÜÙ]ÈŠB‚ˆ\™Ù]
-‹ÛX[šY™\ÝÙX›X[šY™\Ý‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆX[šY™\Ý
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈ›X[šY™\ÝÙX›X[šY™\Ý‹YYXWÝ\OH˜\XØ][Û‹ÛX[šY™\Ý
-ÚœÛÛˆŠB‚ˆ\™Ù]
-‹ÜÝËšœÈ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆÙ\šXÙWÝÛÜšÙ\Š
-HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈœÝËšœÈ‹YYXWÝ\OH˜\XØ][Û‹Ú˜]˜\ØÜš\‹XY\œÏ^È”Ù\šXÙKUÛÜšÙ\‹P[ÝÙYŽˆ‹ÈŸJB‚ˆ\™Ù]
-‹ÚXÛÛ‹œÝ™È‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆXÛÛŠ
-HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈšXÛÛ‹œÝ™È‹YYXWÝ\OHš[XYÙKÜÝ™ÊÞ[ŠB‚ˆ\™Ù]
-‹ÜÝ[\Ë˜ÜÜÈ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆÝ[\Ê
-HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈœÝ[\Ë˜ÜÜÈ‹YYXWÝ\OH^ØÜÜÈŠB‚ˆ\™Ù]
-‹Ø\šœÈ‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆØÜš\
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "manifest.webmanifest", media_type="application/manifest+json")
 
-HOˆš[T™\ÜÛœÙN‚ˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈ˜\šœÈ‹YYXWÝ\OH˜\XØ][Û‹Ú˜]˜\ØÜš\ŠB‚ˆ\™Ù]
-‹ÞÜ]œ]H‹[˜ÛYWÚ[—ÜØÚ[XOQ˜[ÙJBˆYˆÜWÙ˜[˜XÚÊ]ˆÝŠHOˆš[T™\ÜÛœÙN‚ˆ™\]Y\ÝYH
-”“Ó•S‘ÑTˆÈ]
-Kœ™\ÛÛ™J
-BˆYˆ][™™\]Y\ÝYš\×Ùš[J
-H[™”“Ó•S‘ÑT‹œ™\ÛÛ™J
-H[ˆ™\]Y\ÝYœ\™[Î‚ˆ™]\›ˆš[T™\ÜÛœÙJ™\]Y\ÝY
-Bˆ™]\›ˆš[T™\ÜÛœÙJ”“Ó•S‘ÑTˆÈš[™^š[ŠB
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker() -> FileResponse:
+        return FileResponse(
+            FRONTEND_DIR / "sw.js",
+            media_type="application/javascript",
+            headers={"Service-Worker-Allowed": "/"},
+        )
+
+    @app.get("/icon.svg", include_in_schema=False)
+    def icon() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "icon.svg", media_type="image/svg+xml")
+
+    @app.get("/styles.css", include_in_schema=False)
+    def styles() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "styles.css", media_type="text/css")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa_fallback(path: str) -> FileResponse:
+        requested = (FRONTEND_DIR / path).resolve()
+        if path and requested.is_file() and FRONTEND_DIR.resolve() in requested.parents:
+            return FileResponse(requested)
+        return FileResponse(FRONTEND_DIR / "index.html")
