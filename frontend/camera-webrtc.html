@@ -32,8 +32,50 @@
     try { parent.postMessage({ source: 'personofinterest-camera-webrtc', type, message }, location.origin); } catch (_) {}
   }
 
+  function muteMediaElement(element) {
+    try { element.muted = true; } catch (_) {}
+    try { element.volume = 0; } catch (_) {}
+    if (element.tagName === 'AUDIO') {
+      try { element.pause(); } catch (_) {}
+    }
+  }
+
+  function muteDeep(root) {
+    if (!root?.querySelectorAll) return;
+    root.querySelectorAll('audio,video').forEach(muteMediaElement);
+    root.querySelectorAll('*').forEach(element => {
+      try {
+        if (element.shadowRoot) muteDeep(element.shadowRoot);
+      } catch (_) {}
+    });
+  }
+
+  function muteVideoSurface() {
+    // The universal go2rtc player may expose the camera audio together with the
+    // video. Listening audio is handled exclusively by remoteAudio below, so
+    // the nested video surface must remain permanently muted. This prevents a
+    // hidden second audio path from feeding the browser microphone during PTT.
+    try { muteDeep(videoFrame.contentDocument); } catch (_) {}
+  }
+
+  function hardMuteIncomingAudio() {
+    remoteAudio.muted = true;
+    remoteAudio.volume = 0;
+    try { remoteAudio.pause(); } catch (_) {}
+    try { remoteAudio.srcObject = null; } catch (_) {}
+    try {
+      pc?.getReceivers?.().forEach(receiver => {
+        if (receiver.track?.kind === 'audio') receiver.track.enabled = false;
+      });
+    } catch (_) {}
+    muteVideoSurface();
+  }
+
   async function getMicrophone() {
     if (!microphone) return [];
+    // Half-duplex invariant: local playback is cut before getUserMedia opens the
+    // microphone, not after WebRTC negotiation starts.
+    hardMuteIncomingAudio();
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microfone indisponível. Abra o app por HTTPS ou localhost.');
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -49,7 +91,7 @@
       iceServers: [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }],
     });
 
-    if (listen) pc.addTransceiver('audio', { direction: 'recvonly' });
+    if (listen && !microphone) pc.addTransceiver('audio', { direction: 'recvonly' });
 
     const micTracks = await getMicrophone();
     for (const track of micTracks) {
@@ -59,20 +101,20 @@
 
     const remoteTracks = [];
     pc.addEventListener('track', event => {
-      if (event.track.kind !== 'audio') return;
+      if (event.track.kind !== 'audio' || microphone) {
+        if (event.track.kind === 'audio') event.track.enabled = false;
+        return;
+      }
       if (!remoteTracks.includes(event.track)) remoteTracks.push(event.track);
       remoteAudio.srcObject = new MediaStream(remoteTracks);
       remoteAudio.muted = !listen;
-      remoteAudio.play().catch(() => report('autoplay-blocked', 'Toque no vídeo para iniciar o áudio.'));
-    });
-
-    videoFrame.addEventListener('load', () => {
-      if (listen) remoteAudio.play().catch(() => {});
+      remoteAudio.volume = listen ? 1 : 0;
+      if (listen) remoteAudio.play().catch(() => report('autoplay-blocked', 'Toque no vídeo para iniciar o áudio.'));
     });
 
     pc.addEventListener('connectionstatechange', () => {
       if (pc.connectionState === 'connected') {
-        report('connected', microphone ? (listen ? 'Vídeo + áudio + microfone ativos' : 'Falando para a câmera') : 'Vídeo + áudio ativos');
+        report('connected', microphone ? 'Falando para a câmera · escuta suspensa' : 'Vídeo + áudio ativos');
       }
       if (['failed', 'disconnected'].includes(pc.connectionState)) report('connection-error', `Áudio WebRTC: ${pc.connectionState}`);
     });
@@ -109,10 +151,15 @@
     if (!response.ok) throw new Error('Não foi possível carregar a câmera.');
     const camera = await response.json();
 
-    // Video always stays on the primary RTSP stream. Talkback is an isolated
-    // auxiliary stream, so DVRIP failures can never interrupt H.265 video or CV.
+    // Video always stays on the primary RTSP stream. The nested universal player
+    // is forcibly muted because camera listening is provided by remoteAudio.
     videoFrame.src = `/go2rtc/stream.html?src=${encodeURIComponent(camera.stream_name)}`;
     report('video-loading', 'Carregando vídeo…');
+
+    videoFrame.addEventListener('load', () => {
+      [0, 80, 300, 1000].forEach(delay => setTimeout(muteVideoSurface, delay));
+      if (listen && !microphone) remoteAudio.play().catch(() => {});
+    });
 
     if (listen || microphone) await connectAudioOnly();
     else report('connected', 'Vídeo ativo');
@@ -120,10 +167,15 @@
 
   function cleanup() {
     localTracks.forEach(track => track.stop());
+    hardMuteIncomingAudio();
     try { ws?.close(); } catch (_) {}
     try { pc?.close(); } catch (_) {}
-    try { remoteAudio.pause(); } catch (_) {}
   }
+
+  addEventListener('message', event => {
+    if (event.origin !== location.origin || event.data?.source !== 'personofinterest-parent') return;
+    if (event.data?.type === 'hard-mute-audio') hardMuteIncomingAudio();
+  });
 
   addEventListener('beforeunload', cleanup);
   connect().catch(error => report('webrtc-error', error?.message || String(error)));
