@@ -57,11 +57,17 @@ def _decode_audio(payload: bytes) -> Any:
 
 def _camera_context(camera_id: int) -> dict[str, Any]:
     settings = assistant_manager.settings_for(camera_id)
+    try:
+        settings.update(ww.manager.settings_for(camera_id))
+    except Exception:
+        pass
     return {
         "camera_id": int(camera_id),
         "camera_name": str(settings.get("camera_name") or f"Câmera {camera_id}"),
         "timezone": str(settings.get("timezone") or "UTC"),
         "voice_gender": str(settings.get("voice_gender") or "female"),
+        "wake_model": str(settings.get("wake_model") or WAKE_WHISPER_MODEL),
+        "command_model": str(settings.get("command_model") or WAKE_COMMAND_WHISPER_MODEL),
     }
 
 
@@ -94,8 +100,6 @@ def _answer_from_transcripts(
             "certainty": "system",
             "person_id": None,
             "spoken": False,
-            "wake_model": WAKE_WHISPER_MODEL,
-            "command_model": WAKE_COMMAND_WHISPER_MODEL,
         }
 
     if strong_wake:
@@ -112,7 +116,7 @@ def _answer_from_transcripts(
             **context,
             "ok": True,
             "wake_detected": True,
-            "wake_detected_by": "base" if strong_wake else "tiny",
+            "wake_detected_by": "command" if strong_wake else "wake",
             "fast_transcript": fast,
             "command_transcript": strong,
             "command": "",
@@ -121,8 +125,6 @@ def _answer_from_transcripts(
             "certainty": "system",
             "person_id": None,
             "spoken": False,
-            "wake_model": WAKE_WHISPER_MODEL,
-            "command_model": WAKE_COMMAND_WHISPER_MODEL,
         }
 
     answer = answer_command(camera_id, command, context["timezone"])
@@ -144,7 +146,7 @@ def _answer_from_transcripts(
         "ok": True,
         "wake_detected": wake_detected,
         "wake_detected_by": (
-            "base" if strong_wake else "tiny" if fast_wake else None
+            "command" if strong_wake else "wake" if fast_wake else None
         ),
         "fast_transcript": fast,
         "command_transcript": strong,
@@ -155,8 +157,6 @@ def _answer_from_transcripts(
         "person_id": answer.person_id,
         "spoken": spoken,
         "speak_error": speak_error,
-        "wake_model": WAKE_WHISPER_MODEL,
-        "command_model": WAKE_COMMAND_WHISPER_MODEL,
     }
 
 
@@ -170,15 +170,14 @@ def analyze_audio(
     started = time.perf_counter()
     audio = _decode_audio(payload)
     rms = float(ww.np.sqrt(ww.np.mean(ww.np.square(audio)))) if audio.size else 0.0
+    context = _camera_context(camera_id)
 
-    # Lab intentionally runs both models. That gives a clean A/B diagnostic:
-    # whether failure came from always-on wake STT, command STT, or the parser.
     fast_started = time.perf_counter()
-    fast = wake_manager_transcribe(audio)
+    fast = wake_manager_transcribe(audio, context["wake_model"])
     fast_ms = round((time.perf_counter() - fast_started) * 1000.0, 1)
 
     strong_started = time.perf_counter()
-    strong = _transcribe_command(ww.manager, audio)
+    strong = _transcribe_command(ww.manager, audio, context["command_model"])
     strong_ms = round((time.perf_counter() - strong_started) * 1000.0, 1)
 
     result = _answer_from_transcripts(
@@ -199,10 +198,8 @@ def analyze_audio(
     return result
 
 
-def wake_manager_transcribe(audio: Any) -> str:
-    # Use the original tiny manager method. assistant_command_stt_patch only
-    # overrides it through thread-local state while camera processing is active.
-    return str(ww.manager._transcribe(audio) or "").strip()
+def wake_manager_transcribe(audio: Any, model_name: str | None = None) -> str:
+    return str(ww.manager._transcribe(audio, model_name) or "").strip()
 
 
 def analyze_text(
