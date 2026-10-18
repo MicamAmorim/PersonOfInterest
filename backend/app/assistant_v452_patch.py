@@ -18,12 +18,7 @@ WAKE_COOLDOWN_SECONDS = 0.35
 
 
 def looks_like_time_request(text: str) -> bool:
-    """Recognize current-time questions directly from raw Whisper text.
-
-    This intentionally runs before generic command parsing. Tiny Whisper can
-    render 'horas' as 'oras', 'horras', 'hora', etc.; requiring an exact phrase
-    made a basic command unreliable on real camera audio.
-    """
+    """Recognize current-time questions directly from raw Whisper text."""
     q = normalize_text(text)
     if not q:
         return False
@@ -40,12 +35,31 @@ def looks_like_time_request(text: str) -> bool:
     if not has_time_word:
         return False
 
-    # Direct requests are intentionally permissive inside the Tonho command
-    # channel. These cues cover both full and split-window transcriptions.
     cues = {"que", "qual", "agora", "sao", "e", "eh", "diz", "diga", "fala", "fale", "me"}
     if len(tokens) <= 3 or cues.intersection(tokens):
         return True
     return any(fragment in q for fragment in ("que hora", "qual hora", "hora agora", "horario agora"))
+
+
+def _merge_partial_command(pending: str, transcript: str) -> str:
+    """Merge overlapping Whisper windows without duplicating boundary words.
+
+    Example: pending='quem' + next='Quem passou por aqui?' becomes
+    'quem passou por aqui' instead of 'quem quem passou por aqui'.
+    """
+    left = normalize_text(pending).split()
+    right = normalize_text(transcript).split()
+    if not left:
+        return " ".join(right)
+    if not right:
+        return " ".join(left)
+    maximum = min(len(left), len(right))
+    overlap = 0
+    for size in range(maximum, 0, -1):
+        if left[-size:] == right[:size]:
+            overlap = size
+            break
+    return " ".join(left + right[overlap:]).strip()
 
 
 def _ensure_v452_state(manager: Any) -> None:
@@ -84,8 +98,6 @@ def _open_silent_command_window(manager: Any, camera_id: int, command_text: str,
 
 
 def _canonical_time_answer(camera_id: int, timezone_name: str):
-    # Canonical text bypasses any noisy variation once the raw transcript has
-    # already been recognized as a time request by looks_like_time_request().
     return answer_command(camera_id, "que horas sao", timezone_name)
 
 
@@ -152,8 +164,6 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
     timezone_name = conv._timezone_for(camera_id)
 
     if matched:
-        # A fresh explicit wake phrase always recovers the listener, even if a
-        # previous command left a conversation window open.
         active_conversation = bool(conversation_until and now_mono <= conversation_until)
         last = float(self._last_trigger_monotonic.get(camera_id, 0.0))
         if not active_conversation and now_mono - last < WAKE_COOLDOWN_SECONDS:
@@ -164,9 +174,6 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
 
         command_text = conv._extract_command_after_wake(transcript)
 
-        # First inspect the complete raw transcription. This is the path that
-        # guarantees 'Oi, Tonho, que horas são?' works even if extraction or a
-        # Whisper spelling is imperfect.
         if looks_like_time_request(transcript):
             answer = _canonical_time_answer(camera_id, timezone_name)
             _speak(
@@ -186,9 +193,6 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
                 )
                 return
 
-            # A fixed 4 s Whisper window can split 'Oi Tonho, que...' from the
-            # rest of the question. Do not interrupt with an 'I don't know'
-            # response; retain the partial command and wait for the next window.
             _open_silent_command_window(self, camera_id, command_text, transcript)
             return
 
@@ -220,7 +224,7 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
             return
 
         pending = str(self._poi_pending_command.get(camera_id) or "").strip()
-        combined = " ".join(part for part in (pending, transcript) if part).strip()
+        combined = _merge_partial_command(pending, transcript)
 
         if looks_like_time_request(combined):
             answer = _canonical_time_answer(camera_id, timezone_name)
@@ -239,8 +243,6 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
                 _open_silent_command_window(self, camera_id, combined, transcript)
                 return
 
-            # A misunderstood command must never leave Tonho apparently dead.
-            # Give concise feedback and reopen the command window.
             answer.text = "Não entendi. Pode repetir?"
             answer.intent = "unknown"
             conv._close_conversation(self, camera_id)
@@ -268,8 +270,6 @@ def install() -> None:
     if getattr(cls, "_poi_v452_patch", False):
         return
 
-    # conv._speak_answer reads these module globals at runtime. Keep guards short
-    # and let echo matching do the heavy lifting instead of muting the listener.
     conv.WAKE_AFTER_SPEECH_MUTE_SECONDS = FINAL_GUARD_SECONDS
     conv.WAKE_FOLLOWUP_GUARD_SECONDS = FOLLOWUP_GUARD_SECONDS
     conv.WAKE_RESPONSE_COOLDOWN_SECONDS = WAKE_COOLDOWN_SECONDS
