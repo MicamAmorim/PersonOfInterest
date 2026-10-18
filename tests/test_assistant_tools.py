@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.assistant_tools import detect_intent, normalize_text
 from app.assistant_conversation_patch import _extract_command_after_wake
 from app.assistant_v452_patch import looks_like_time_request
+from app.assistant_command_stt_patch import _merge_wake_and_command
 
 
 class AssistantToolTests(unittest.TestCase):
@@ -69,6 +70,22 @@ class AssistantToolTests(unittest.TestCase):
     def test_split_time_question_can_be_recombined(self):
         self.assertFalse(looks_like_time_request("Oi Tonho que"))
         self.assertTrue(looks_like_time_request("que horas são"))
+
+    def test_dual_stt_preserves_wake_from_tiny(self):
+        merged = _merge_wake_and_command(
+            "Oi, Tonho! Queria, Tonho!",
+            "Que horas são?",
+        )
+        self.assertTrue(merged.startswith("Oi, Tonho!"))
+        self.assertIn("Que horas são?", merged)
+        self.assertTrue(looks_like_time_request(merged))
+
+    def test_dual_stt_keeps_command_wake_when_base_hears_it(self):
+        merged = _merge_wake_and_command(
+            "Oi Tonho",
+            "Oi, Tonho, quem está aqui?",
+        )
+        self.assertEqual(merged, "Oi, Tonho, quem está aqui?")
 
 
 if __name__ == "__main__":
