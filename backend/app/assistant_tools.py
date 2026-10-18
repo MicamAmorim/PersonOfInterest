@@ -29,6 +29,35 @@ def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
     return any(phrase in text for phrase in phrases)
 
 
+def _looks_like_time_question(q: str) -> bool:
+    """Recognize natural/Whisper variants of a request for the current time.
+
+    Tiny Whisper commonly varies plural/agreement ("que hora sao"), drops
+    function words ("horas agora") or chooses "horario". During the Tonho
+    command window, a time word plus a question/request cue is sufficiently
+    specific and much safer than requiring one exact sentence.
+    """
+    tokens = q.split()
+    if not tokens:
+        return False
+    time_tokens = {
+        "hora", "horas", "horario", "horarios", "horasao", "horassao",
+    }
+    has_time_word = any(token in time_tokens or token.startswith("hora") for token in tokens)
+    if not has_time_word:
+        return False
+    if len(tokens) <= 2:
+        return True
+    cues = {"que", "qual", "quais", "agora", "sao", "e", "eh", "me", "diz", "diga", "fala", "fale"}
+    return bool(cues.intersection(tokens)) or _contains_any(
+        q,
+        (
+            "que hora", "qual hora", "qual horario", "que horario",
+            "hora agora", "horas agora", "me diz a hora", "me fala a hora",
+        ),
+    )
+
+
 def detect_intent(text: str, person_names: list[str] | None = None) -> tuple[str, str | None]:
     q = normalize_text(text)
     if not q:
@@ -36,7 +65,7 @@ def detect_intent(text: str, person_names: list[str] | None = None) -> tuple[str
 
     if _contains_any(q, ("o que voce sabe fazer", "o que voce faz", "quais comandos", "me ajuda", "ajuda tonho")):
         return "help", None
-    if _contains_any(q, ("que horas sao", "que horas e", "qual a hora", "me diz a hora")):
+    if _looks_like_time_question(q):
         return "time", None
     if _contains_any(q, ("quem sou eu", "voce sabe quem eu sou", "sabe quem eu sou")):
         return "who_am_i", None
