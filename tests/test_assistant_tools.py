@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.assistant_tools import detect_intent, normalize_text
 from app.assistant_conversation_patch import _extract_command_after_wake
-from app.assistant_v452_patch import looks_like_time_request
+from app.assistant_v452_patch import _merge_partial_command, looks_like_time_request
 from app.assistant_command_stt_patch import _eligible_for_wake_probe, _merge_wake_and_command
 
 
@@ -58,6 +58,11 @@ class AssistantToolTests(unittest.TestCase):
         self.assertEqual(_extract_command_after_wake("Oi Tonio! Quem sou eu?"), "quem sou eu")
         self.assertEqual(_extract_command_after_wake("Oi, Tonho, que hora são?"), "que hora sao")
         self.assertEqual(_extract_command_after_wake("Oi, Tonho!"), "")
+
+    def test_split_windows_do_not_duplicate_boundary_word(self):
+        self.assertEqual(_merge_partial_command("quem", "Quem passou por aqui?"), "quem passou por aqui")
+        self.assertEqual(_merge_partial_command("que", "horas são?"), "que horas sao")
+        self.assertEqual(_merge_partial_command("quem passou", "passou por aqui"), "quem passou por aqui")
 
     def test_v452_raw_time_fast_path(self):
         variants = [
