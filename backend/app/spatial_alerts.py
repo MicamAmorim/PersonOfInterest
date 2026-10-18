@@ -85,8 +85,11 @@ def _inside_polygon(point: Point, polygon: list[Point]) -> bool:
         xj, yj = polygon[j]
         if _on_segment((xi, yi), (xj, yj), point):
             return True
+        denominator = yj - yi
+        if abs(denominator) < _EPS:
+            denominator = _EPS if denominator >= 0 else -_EPS
         intersects = ((yi > y) != (yj > y)) and (
-            x < (xj - xi) * (y - yi) / max(_EPS, (yj - yi)) + xi
+            x < (xj - xi) * (y - yi) / denominator + xi
         )
         if intersects:
             inside = not inside
