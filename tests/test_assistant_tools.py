@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.assistant_tools import detect_intent, normalize_text
 from app.assistant_conversation_patch import _extract_command_after_wake
 from app.assistant_v452_patch import looks_like_time_request
-from app.assistant_command_stt_patch import _merge_wake_and_command
+from app.assistant_command_stt_patch import _eligible_for_wake_probe, _merge_wake_and_command
 
 
 class AssistantToolTests(unittest.TestCase):
@@ -86,6 +86,18 @@ class AssistantToolTests(unittest.TestCase):
             "Oi, Tonho, quem está aqui?",
         )
         self.assertEqual(merged, "Oi, Tonho, quem está aqui?")
+
+    def test_wake_rescue_accepts_observed_tiny_mishearing(self):
+        self.assertTrue(_eligible_for_wake_probe("Oito em André-tapasso Brací.", 0.00905))
+
+    def test_wake_rescue_rejects_low_energy_or_long_speech(self):
+        self.assertFalse(_eligible_for_wake_probe("Oito em André-tapasso Brací.", 0.001))
+        self.assertFalse(
+            _eligible_for_wake_probe(
+                "esta é uma conversa longa que não deveria acionar a segunda checagem continuamente",
+                0.02,
+            )
+        )
 
 
 if __name__ == "__main__":
