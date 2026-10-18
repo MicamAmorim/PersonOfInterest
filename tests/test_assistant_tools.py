@@ -21,6 +21,20 @@ class AssistantToolTests(unittest.TestCase):
         self.assertEqual(detect_intent("Tem alguém desconhecido?")[0], "unknown_today")
         self.assertEqual(detect_intent("Que horas são?")[0], "time")
 
+    def test_detects_whisper_time_variants(self):
+        variants = [
+            "Que hora são?",
+            "Que horas?",
+            "Que horas são agora?",
+            "Qual horário?",
+            "Horário agora",
+            "Me fala a hora",
+            "Horas agora",
+        ]
+        for phrase in variants:
+            with self.subTest(phrase=phrase):
+                self.assertEqual(detect_intent(phrase)[0], "time")
+
     def test_detects_last_seen_named_person(self):
         intent, name = detect_intent(
             "Quando Andressa passou por aqui?",
@@ -35,6 +49,7 @@ class AssistantToolTests(unittest.TestCase):
             "quem passou aqui hoje",
         )
         self.assertEqual(_extract_command_after_wake("Oi Tonio! Quem sou eu?"), "quem sou eu")
+        self.assertEqual(_extract_command_after_wake("Oi, Tonho, que hora são?"), "que hora sao")
         self.assertEqual(_extract_command_after_wake("Oi, Tonho!"), "")
 
 
