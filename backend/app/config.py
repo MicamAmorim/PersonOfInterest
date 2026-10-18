@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.5.3"
+APP_VERSION = "0.4.5.4"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -75,9 +75,9 @@ ASSISTANT_SETTLE_SECONDS = float(os.getenv("ASSISTANT_SETTLE_SECONDS", "12.0"))
 ASSISTANT_UNKNOWN_FACE_QUALITY = float(os.getenv("ASSISTANT_UNKNOWN_FACE_QUALITY", "0.72"))
 
 # V4.4/V4.5 local voice activation and short deterministic conversation.
-# Tiny stays always-on for inexpensive wake detection. V4.5.3 loads the
-# stronger command model only after wake/follow-up so normal listening remains
-# lightweight while actual questions get a better Portuguese transcription.
+# Tiny stays always-on as the cheap first pass. Base handles commands and V4.5.4
+# may also rescue a missed wake word on short, clear speech. The base model is
+# preloaded in the background only when a persisted wake listener is enabled.
 WAKE_PHRASE = os.getenv("WAKE_PHRASE", "Oi, Tonho!")
 WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "tiny")
 WAKE_COMMAND_WHISPER_MODEL = os.getenv("WAKE_COMMAND_WHISPER_MODEL", "base")
@@ -89,6 +89,10 @@ WAKE_CONTEXT_SECONDS = float(os.getenv("WAKE_CONTEXT_SECONDS", "20.0"))
 WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "0.35"))
 WAKE_FOLLOWUP_GUARD_SECONDS = float(os.getenv("WAKE_FOLLOWUP_GUARD_SECONDS", "0.25"))
 WAKE_CONVERSATION_SECONDS = float(os.getenv("WAKE_CONVERSATION_SECONDS", "10.0"))
+WAKE_FALLBACK_STT_ENABLED = os.getenv("WAKE_FALLBACK_STT_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+WAKE_FALLBACK_MIN_RMS = float(os.getenv("WAKE_FALLBACK_MIN_RMS", "0.006"))
+WAKE_FALLBACK_MAX_WORDS = int(os.getenv("WAKE_FALLBACK_MAX_WORDS", "8"))
+WAKE_FALLBACK_COOLDOWN_SECONDS = float(os.getenv("WAKE_FALLBACK_COOLDOWN_SECONDS", "1.5"))
 
 # V4 alerts / Web Push.
 VAPID_PRIVATE_KEY_PATH = Path(
