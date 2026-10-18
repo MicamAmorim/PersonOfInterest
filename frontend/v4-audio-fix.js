@@ -160,3 +160,22 @@
 
   renderHalfDuplexAudioState();
 })();
+
+// V4.8 spatial alerts are intentionally isolated from the proven PTT logic
+// above. Load their assets after the existing runtime has created the Alerts UI.
+(() => {
+  if (!document.querySelector('link[data-poi-spatial]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/v48-spatial.css';
+    link.dataset.poiSpatial = '1';
+    document.head.appendChild(link);
+  }
+  if (!document.querySelector('script[data-poi-spatial]')) {
+    const script = document.createElement('script');
+    script.src = '/v48-spatial-alerts.js';
+    script.defer = true;
+    script.dataset.poiSpatial = '1';
+    document.head.appendChild(script);
+  }
+})();
