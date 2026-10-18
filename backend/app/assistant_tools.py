@@ -30,13 +30,7 @@ def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
 
 
 def _looks_like_time_question(q: str) -> bool:
-    """Recognize natural/Whisper variants of a request for the current time.
-
-    Tiny Whisper commonly varies plural/agreement ("que hora sao"), drops
-    function words ("horas agora") or chooses "horario". During the Tonho
-    command window, a time word plus a question/request cue is sufficiently
-    specific and much safer than requiring one exact sentence.
-    """
+    """Recognize natural/Whisper variants of a request for the current time."""
     tokens = q.split()
     if not tokens:
         return False
@@ -58,6 +52,31 @@ def _looks_like_time_question(q: str) -> bool:
     )
 
 
+def _looks_like_who_passed(q: str) -> bool:
+    """Treat natural 'quem passou por aqui?' as today's camera history.
+
+    V4.5 initially required the literal word 'hoje', which made a perfectly
+    natural question fall through even when Whisper transcribed it correctly.
+    Until Tonho has richer date/context reasoning, an unqualified history
+    question means the current local day for the selected camera.
+    """
+    tokens = set(q.split())
+    if "quem" not in tokens:
+        return False
+    movement = any(token.startswith("pass") or token.startswith("aparec") for token in tokens)
+    if not movement:
+        return False
+    return "hoje" in tokens or "aqui" in tokens or "por aqui" in q
+
+
+def _looks_like_count_passed(q: str) -> bool:
+    tokens = set(q.split())
+    quantity = bool({"quantas", "quantos", "quantidade"}.intersection(tokens))
+    people = "pessoas" in tokens or "pessoa" in tokens or "quantos" in tokens or "quantas" in tokens
+    movement = any(token.startswith("pass") or token.startswith("aparec") for token in tokens)
+    return quantity and people and movement
+
+
 def detect_intent(text: str, person_names: list[str] | None = None) -> tuple[str, str | None]:
     q = normalize_text(text)
     if not q:
@@ -71,10 +90,10 @@ def detect_intent(text: str, person_names: list[str] | None = None) -> tuple[str
         return "who_am_i", None
     if _contains_any(q, ("quem esta aqui", "quem ta aqui", "quem esta ai", "quem ta ai", "quem voce esta vendo", "quem voce ve")):
         return "who_is_here", None
-    if ("quem" in q and "pass" in q and "hoje" in q) or _contains_any(q, ("quem apareceu aqui hoje", "quem apareceu hoje")):
-        return "who_today", None
-    if _contains_any(q, ("quantas pessoas passaram hoje", "quantas pessoas apareceram hoje", "quantos passaram hoje", "quantas passaram hoje")):
+    if _looks_like_count_passed(q):
         return "count_today", None
+    if _looks_like_who_passed(q) or _contains_any(q, ("quem apareceu aqui hoje", "quem apareceu hoje")):
+        return "who_today", None
     if _contains_any(q, ("tem alguem desconhecido", "ha alguem desconhecido", "alguem desconhecido hoje", "viu alguem desconhecido", "viu alguem que nao conhece")):
         return "unknown_today", None
     if _contains_any(q, ("qual seu nome", "como voce se chama", "quem e voce")):
@@ -255,7 +274,7 @@ def answer_command(camera_id: int, text: str, timezone_name: str | None = None) 
 
     if intent == "help":
         return CommandAnswer(
-            "Por enquanto você pode perguntar quem você é, quem está aqui, quem passou aqui hoje, quando alguém passou, quantas pessoas passaram hoje, se há desconhecidos e que horas são.",
+            "Por enquanto você pode perguntar quem você é, quem está aqui, quem passou por aqui, quando alguém passou, quantas pessoas passaram, se há desconhecidos e que horas são.",
             intent,
         )
     if intent == "assistant_name":
