@@ -23,6 +23,11 @@ class AssistantToolTests(unittest.TestCase):
         self.assertEqual(detect_intent("Tem alguém desconhecido?")[0], "unknown_today")
         self.assertEqual(detect_intent("Que horas são?")[0], "time")
 
+    def test_history_does_not_require_word_hoje(self):
+        self.assertEqual(detect_intent("Quem passou por aqui?")[0], "who_today")
+        self.assertEqual(detect_intent("Quem apareceu aqui?")[0], "who_today")
+        self.assertEqual(detect_intent("Quantas pessoas passaram por aqui?")[0], "count_today")
+
     def test_detects_whisper_time_variants(self):
         variants = [
             "Que hora são?",
