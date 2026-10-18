@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.assistant_tools import detect_intent, normalize_text
 from app.assistant_conversation_patch import _extract_command_after_wake
+from app.assistant_v452_patch import looks_like_time_request
 
 
 class AssistantToolTests(unittest.TestCase):
@@ -51,6 +52,23 @@ class AssistantToolTests(unittest.TestCase):
         self.assertEqual(_extract_command_after_wake("Oi Tonio! Quem sou eu?"), "quem sou eu")
         self.assertEqual(_extract_command_after_wake("Oi, Tonho, que hora são?"), "que hora sao")
         self.assertEqual(_extract_command_after_wake("Oi, Tonho!"), "")
+
+    def test_v452_raw_time_fast_path(self):
+        variants = [
+            "Oi, Tonho, que horas são?",
+            "Oi Tonio que hora são",
+            "Oi Tonho qual o horário",
+            "Oi Tonho que oras são",
+            "Que horas são",
+        ]
+        for phrase in variants:
+            with self.subTest(phrase=phrase):
+                self.assertTrue(looks_like_time_request(phrase))
+        self.assertFalse(looks_like_time_request("Oi, Tonho, quem está aqui?"))
+
+    def test_split_time_question_can_be_recombined(self):
+        self.assertFalse(looks_like_time_request("Oi Tonho que"))
+        self.assertTrue(looks_like_time_request("que horas são"))
 
 
 if __name__ == "__main__":
