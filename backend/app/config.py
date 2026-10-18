@@ -82,13 +82,12 @@ WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "tiny")
 WAKE_CHUNK_SECONDS = float(os.getenv("WAKE_CHUNK_SECONDS", "4.0"))
 WAKE_OVERLAP_SECONDS = float(os.getenv("WAKE_OVERLAP_SECONDS", "0.8"))
 WAKE_MIN_RMS = float(os.getenv("WAKE_MIN_RMS", "0.004"))
-WAKE_RESPONSE_COOLDOWN_SECONDS = float(os.getenv("WAKE_RESPONSE_COOLDOWN_SECONDS", "6.0"))
+# Keep these short. Echo is now filtered from the last TTS transcript, so
+# multi-second deaf periods are worse than the echo risk for conversation.
+WAKE_RESPONSE_COOLDOWN_SECONDS = float(os.getenv("WAKE_RESPONSE_COOLDOWN_SECONDS", "1.5"))
 WAKE_CONTEXT_SECONDS = float(os.getenv("WAKE_CONTEXT_SECONDS", "20.0"))
-WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "6.0"))
-# The short "Pode falar" prompt must not make Tonho deaf for several seconds.
-# A separate short guard protects against speaker echo before the follow-up
-# window opens; the final-answer guard above can remain conservative.
-WAKE_FOLLOWUP_GUARD_SECONDS = float(os.getenv("WAKE_FOLLOWUP_GUARD_SECONDS", "0.9"))
+WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "1.2"))
+WAKE_FOLLOWUP_GUARD_SECONDS = float(os.getenv("WAKE_FOLLOWUP_GUARD_SECONDS", "0.7"))
 WAKE_CONVERSATION_SECONDS = float(os.getenv("WAKE_CONVERSATION_SECONDS", "10.0"))
 
 # V4 alerts / Web Push.
