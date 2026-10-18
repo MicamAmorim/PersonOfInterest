@@ -237,6 +237,7 @@ class SpatialAlertManager:
                                 "fired": False,
                                 "last_trigger": 0.0,
                                 "last_seen": now,
+                                "was_inside": False,
                             },
                         )
                         state["last_seen"] = now
@@ -313,7 +314,23 @@ class SpatialAlertManager:
             return
         inside = _inside_polygon(foot, polygon)
         mode = str(rule.get("zone_mode") or "inside")
-        condition = inside if mode == "inside" else not inside
+
+        if mode == "outside":
+            # "Sair" is an actual transition: a track that first appears outside
+            # must not alert. It becomes armed only after its foot was seen inside.
+            if inside:
+                state["was_inside"] = True
+                state["condition_since"] = None
+                state["fired"] = False
+                return
+            if not state.get("was_inside"):
+                state["condition_since"] = None
+                state["fired"] = False
+                return
+            condition = True
+        else:
+            condition = inside
+
         if not condition:
             state["condition_since"] = None
             state["fired"] = False
@@ -411,7 +428,7 @@ class SpatialAlertManager:
             elif trigger_kind == "zone_inside":
                 body = f"{who} permaneceu dentro de {rule_name} em {camera_name}."
             else:
-                body = f"{who} permaneceu fora de {rule_name} em {camera_name}."
+                body = f"{who} saiu e permaneceu fora de {rule_name} em {camera_name}."
             payload = json.dumps(
                 {
                     "title": rule_name,
