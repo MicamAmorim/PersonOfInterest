@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import math
-import threading
 from typing import Any
 
 from . import body_identity as bi
 from . import identity as fi
-from .assistant import manager as assistant_manager
 from .db import connection, utc_now
 
 
@@ -110,37 +108,6 @@ def _extract_face_reference(event: dict[str, Any], person_id: int) -> bool:
         return False
 
 
-def _assistant_payload(event_id: int) -> dict[str, Any] | None:
-    assistant_manager.ensure_schema()
-    with connection() as conn:
-        row = conn.execute(
-            """SELECT e.*, c.name AS camera_name, c.stream_name, c.rtsp_url, c.sync_status,
-                s.interval_minutes, s.voice_gender, s.timezone, s.updated_at AS assistant_updated_at,
-                p.name AS person_name, pp.name AS probable_person_name,
-                fs.quality AS face_quality
-            FROM events e
-            JOIN cameras c ON c.id = e.camera_id
-            JOIN camera_assistant_settings s ON s.camera_id = e.camera_id AND s.enabled = 1
-            LEFT JOIN persons p ON p.id = e.person_id
-            LEFT JOIN persons pp ON pp.id = e.probable_person_id
-            LEFT JOIN face_samples fs ON fs.event_id = e.id
-            WHERE e.id = ?""",
-            (event_id,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def _reconsider_assistant(event_id: int) -> None:
-    """Re-evaluate one manually confirmed event even if it was already consumed."""
-    try:
-        payload = _assistant_payload(event_id)
-        if payload is None:
-            return
-        assistant_manager._handle_event(payload)
-    except Exception as exc:
-        assistant_manager.error = f"Reavaliação após cadastro manual: {exc}"
-
-
 def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
     original = getattr(type(self), "_poi_original_confirm_event_identity")
     original(self, event_id, person_id)
@@ -229,27 +196,15 @@ def _reinforce_manual_event(self: Any, event_id: int, person_id: int) -> None:
         )
         conn.commit()
 
-    # Re-run assistant logic on this event in a daemon thread. The normal poller
-    # may already have consumed it as unknown/no-face; direct reconsideration
-    # lets a newly created person receive their first turn greeting immediately.
-    try:
-        payload = _assistant_payload(event_id)
-        if payload is not None:
-            thread = threading.Thread(
-                target=_reconsider_assistant,
-                args=(event_id,),
-                name=f"poi-assistant-manual-{event_id}",
-                daemon=True,
-            )
-            thread.start()
-    except Exception:
-        pass
-
+    # Manual review is learning, not a new physical appearance. Do not feed the
+    # reviewed historical event back into the assistant. Tonho will greet this
+    # person naturally when a later detection creates a new event.
     self._last_manual_learning = {
         "event_id": event_id,
         "person_id": person_id,
         "face_reference": face_reference,
         "body_reference": body_reference,
+        "assistant_replayed": False,
         "updated_at": utc_now(),
     }
     self.notify_change()
