@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.7"
+APP_VERSION = "0.4.8"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -74,8 +74,8 @@ ASSISTANT_POLL_SECONDS = float(os.getenv("ASSISTANT_POLL_SECONDS", "1.0"))
 ASSISTANT_SETTLE_SECONDS = float(os.getenv("ASSISTANT_SETTLE_SECONDS", "12.0"))
 ASSISTANT_UNKNOWN_FACE_QUALITY = float(os.getenv("ASSISTANT_UNKNOWN_FACE_QUALITY", "0.72"))
 
-# V4.4-V4.7 local voice activation, deterministic conversation and Tonho Lab.
-# V4.7 defaults to base for the always-on wake transcript and small for commands.
+# V4.4-V4.8 local voice activation, deterministic conversation and Tonho Lab.
+# V4.7+ defaults to base for the always-on wake transcript and small for commands.
 # Model selection is stored per camera. faster-whisper automatically downloads a
 # selected model on first load if it is not already in the local cache.
 WAKE_PHRASE = os.getenv("WAKE_PHRASE", "Oi, Tonho!")
