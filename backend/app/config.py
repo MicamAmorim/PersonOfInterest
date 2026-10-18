@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.5"
+APP_VERSION = "0.4.5.1"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -85,7 +85,11 @@ WAKE_MIN_RMS = float(os.getenv("WAKE_MIN_RMS", "0.004"))
 WAKE_RESPONSE_COOLDOWN_SECONDS = float(os.getenv("WAKE_RESPONSE_COOLDOWN_SECONDS", "6.0"))
 WAKE_CONTEXT_SECONDS = float(os.getenv("WAKE_CONTEXT_SECONDS", "20.0"))
 WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "6.0"))
-WAKE_CONVERSATION_SECONDS = float(os.getenv("WAKE_CONVERSATION_SECONDS", "8.0"))
+# The short "Pode falar" prompt must not make Tonho deaf for several seconds.
+# A separate short guard protects against speaker echo before the follow-up
+# window opens; the final-answer guard above can remain conservative.
+WAKE_FOLLOWUP_GUARD_SECONDS = float(os.getenv("WAKE_FOLLOWUP_GUARD_SECONDS", "0.9"))
+WAKE_CONVERSATION_SECONDS = float(os.getenv("WAKE_CONVERSATION_SECONDS", "10.0"))
 
 # V4 alerts / Web Push.
 VAPID_PRIVATE_KEY_PATH = Path(
