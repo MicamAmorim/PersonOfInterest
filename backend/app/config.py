@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.5.1"
+APP_VERSION = "0.4.5.2"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -82,12 +82,12 @@ WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "tiny")
 WAKE_CHUNK_SECONDS = float(os.getenv("WAKE_CHUNK_SECONDS", "4.0"))
 WAKE_OVERLAP_SECONDS = float(os.getenv("WAKE_OVERLAP_SECONDS", "0.8"))
 WAKE_MIN_RMS = float(os.getenv("WAKE_MIN_RMS", "0.004"))
-# Keep these short. Echo is now filtered from the last TTS transcript, so
-# multi-second deaf periods are worse than the echo risk for conversation.
-WAKE_RESPONSE_COOLDOWN_SECONDS = float(os.getenv("WAKE_RESPONSE_COOLDOWN_SECONDS", "1.5"))
+# V4.5.2: keep the listener responsive and reject TTS echoes by content instead
+# of deliberately muting the camera microphone for several seconds.
+WAKE_RESPONSE_COOLDOWN_SECONDS = float(os.getenv("WAKE_RESPONSE_COOLDOWN_SECONDS", "0.35"))
 WAKE_CONTEXT_SECONDS = float(os.getenv("WAKE_CONTEXT_SECONDS", "20.0"))
-WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "1.2"))
-WAKE_FOLLOWUP_GUARD_SECONDS = float(os.getenv("WAKE_FOLLOWUP_GUARD_SECONDS", "0.7"))
+WAKE_AFTER_SPEECH_MUTE_SECONDS = float(os.getenv("WAKE_AFTER_SPEECH_MUTE_SECONDS", "0.35"))
+WAKE_FOLLOWUP_GUARD_SECONDS = float(os.getenv("WAKE_FOLLOWUP_GUARD_SECONDS", "0.25"))
 WAKE_CONVERSATION_SECONDS = float(os.getenv("WAKE_CONVERSATION_SECONDS", "10.0"))
 
 # V4 alerts / Web Push.
