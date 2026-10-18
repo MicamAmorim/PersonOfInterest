@@ -4,13 +4,14 @@ import asyncio
 import threading
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .assistant import manager as assistant_manager
 from .assistant_lab import analyze_audio as analyze_lab_audio
 from .assistant_lab import analyze_text as analyze_lab_text
+from .db import connection
 from .wake_word import manager as wake_word_manager
 
 
@@ -23,6 +24,8 @@ class AssistantSettingsUpdate(BaseModel):
     voice_gender: Literal["female", "male"] = "female"
     timezone: str = Field(default="UTC", min_length=1, max_length=80)
     wake_enabled: bool = False
+    wake_model: Literal["tiny", "base", "small"] | None = None
+    command_model: Literal["base", "small", "medium"] | None = None
 
 
 class TonhoLabTextRequest(BaseModel):
@@ -32,9 +35,12 @@ class TonhoLabTextRequest(BaseModel):
     speak: bool = False
 
 
-def _warm_wake_model() -> None:
+def _warm_models(wake_model: str, command_model: str) -> None:
     try:
-        wake_word_manager._ensure_model()
+        wake_word_manager._ensure_model(wake_model)
+        from .assistant_command_stt_patch import _ensure_command_model
+
+        _ensure_command_model(wake_word_manager, command_model)
     except Exception as exc:
         wake_word_manager.error = str(exc)
 
@@ -66,10 +72,24 @@ def update_assistant_camera(camera_id: int, payload: AssistantSettingsUpdate) ->
             voice_gender=payload.voice_gender,
             timezone_name=payload.timezone,
         )
-        wake_word_manager.update_setting(camera_id, payload.wake_enabled)
+        wake_saved = wake_word_manager.update_setting(
+            camera_id,
+            payload.wake_enabled,
+            wake_model=payload.wake_model,
+            command_model=payload.command_model,
+        )
+        enriched = wake_word_manager.enrich_settings([saved])[0]
         if payload.enabled and payload.wake_enabled and wake_word_manager.available:
-            threading.Thread(target=_warm_wake_model, name="poi-wake-model-warmup", daemon=True).start()
-        return wake_word_manager.enrich_settings([saved])[0]
+            threading.Thread(
+                target=_warm_models,
+                args=(
+                    str(wake_saved.get("wake_model") or enriched.get("wake_model") or "base"),
+                    str(wake_saved.get("command_model") or enriched.get("command_model") or "small"),
+                ),
+                name=f"poi-tonho-model-warmup-{camera_id}",
+                daemon=True,
+            ).start()
+        return enriched
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -84,6 +104,49 @@ def test_assistant_camera(camera_id: int) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/api/assistant/cameras/{camera_id}/logs")
+def assistant_camera_logs(
+    camera_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    try:
+        assistant_manager.settings_for(camera_id)
+        wake_word_manager.ensure_schema()
+        assistant_manager.ensure_schema()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    with connection() as conn:
+        wake_rows = conn.execute(
+            """SELECT id, camera_id, transcript, matched, response_text,
+                certainty, person_id, created_at
+            FROM assistant_wake_log
+            WHERE camera_id = ?
+            ORDER BY id DESC LIMIT ?""",
+            (camera_id, limit),
+        ).fetchall()
+        speech_rows = conn.execute(
+            """SELECT id, event_id, certainty, kind, text, status, error, spoken_at
+            FROM assistant_speech_log
+            WHERE camera_id = ?
+            ORDER BY id DESC LIMIT ?""",
+            (camera_id, limit),
+        ).fetchall()
+
+    wake_state = wake_word_manager.state()
+    camera_state = (
+        wake_state.get("cameras", {}).get(str(camera_id))
+        or wake_state.get("cameras", {}).get(camera_id)
+        or {}
+    )
+    return {
+        "camera_id": camera_id,
+        "camera_state": camera_state,
+        "wake": [dict(row) for row in wake_rows],
+        "speech": [dict(row) for row in speech_rows],
+    }
 
 
 @router.post("/api/assistant/lab/text")
