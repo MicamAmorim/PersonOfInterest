@@ -105,6 +105,7 @@ VAPID_PRIVATE_KEY_PATH = Path(
     os.getenv("VAPID_PRIVATE_KEY_PATH", str(VAPID_DIR / "private_key.pem"))
 ).resolve()
 VAPID_PUBLIC_KEY_PATH = Path(
-    os.getenv("VAPID_PUBLIC_KEY_PATH", str(VAPID_DIR / "vapid" / "public_key.txt"))).resolve()
+    os.getenv("VAPID_PUBLIC_KEY_PATH", str(VAPID_DIR / "public_key.txt"))
+).resolve()
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:personofinterest@local.invalid")
 ALERT_POLL_SECONDS = float(os.getenv("ALERT_POLL_SECONDS", "1.0"))
