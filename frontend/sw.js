@@ -1,5 +1,5 @@
-const CACHE = 'personofinterest-v4.5.0';
-const SHELL = ['/', '/styles.css', '/v2.css', '/v34.css', '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/v4-audio-fix.js', '/v42-assistant.js', '/camera-webrtc.html', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'personofinterest-v4.6.0';
+const SHELL = ['/', '/styles.css', '/v2.css', '/v34.css', '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/v4-audio-fix.js', '/v42-assistant.js', '/camera-webrtc.html', '/tonho-lab.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
