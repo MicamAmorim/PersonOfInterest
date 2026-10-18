@@ -9,6 +9,7 @@ from .assistant_tools import answer_command
 from .config import (
     WAKE_AFTER_SPEECH_MUTE_SECONDS,
     WAKE_CONVERSATION_SECONDS,
+    WAKE_FOLLOWUP_GUARD_SECONDS,
     WAKE_MIN_RMS,
     WAKE_RESPONSE_COOLDOWN_SECONDS,
 )
@@ -72,6 +73,26 @@ def _set_mute(manager: Any, camera_id: int, seconds: float | None = None) -> flo
     return mute_until
 
 
+def _looks_like_last_tts(manager: Any, camera_id: int, transcript: str) -> bool:
+    """Ignore likely speaker echo without muting the user's follow-up for seconds."""
+    heard = ww.normalize_phrase(transcript)
+    if len(heard) < 3:
+        return False
+    try:
+        with manager.lock:
+            state = dict(manager._camera_state.get(camera_id) or {})
+    except Exception:
+        state = dict(getattr(manager, "_camera_state", {}).get(camera_id) or {})
+    spoken = ww.normalize_phrase(str(state.get("last_response") or ""))
+    if len(spoken) < 3:
+        return False
+    if heard == spoken:
+        return True
+    if len(heard) >= 7 and (heard in spoken or spoken in heard):
+        return True
+    return difflib.SequenceMatcher(None, heard, spoken).ratio() >= 0.72
+
+
 def _record_last(
     manager: Any,
     camera: dict[str, Any],
@@ -119,11 +140,11 @@ def _speak_answer(
     try:
         assistant_manager.speak(camera_id, response, voice_gender=voice_gender)
         manager._last_trigger_monotonic[camera_id] = time.monotonic()
-        # A final answer keeps the longer anti-echo guard used by V4.4. The short
-        # "Pode falar" prompt needs a smaller guard so the user can answer
-        # naturally; its TTS phrase is short, while the actual question window
-        # starts only after this guard expires.
-        mute_seconds = min(WAKE_AFTER_SPEECH_MUTE_SECONDS, 2.5) if open_conversation else WAKE_AFTER_SPEECH_MUTE_SECONDS
+
+        # Final answers keep the conservative half-duplex guard. The short
+        # "Pode falar" prompt uses a much smaller guard and an echo detector,
+        # otherwise a natural immediate follow-up is discarded.
+        mute_seconds = WAKE_FOLLOWUP_GUARD_SECONDS if open_conversation else WAKE_AFTER_SPEECH_MUTE_SECONDS
         mute_until = _set_mute(manager, camera_id, mute_seconds)
         if open_conversation:
             ready_at = mute_until
@@ -166,8 +187,6 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
     camera_id = int(camera["id"])
     now_mono = time.monotonic()
 
-    # Strict half duplex: do not even transcribe while Tonho's own response may
-    # still be coming out of the camera speaker.
     if now_mono < float(self._poi_audio_mute_until.get(camera_id, 0.0)):
         return
     if audio.size == 0:
@@ -232,6 +251,17 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
         return
 
     if conversation_until and now_mono >= conversation_ready and now_mono <= conversation_until:
+        # Speaker echo can arrive after go2rtc has already returned. Ignore that
+        # echo but keep the conversation open so the next real utterance is heard.
+        if _looks_like_last_tts(self, camera_id, transcript):
+            self._set_camera_state(
+                camera_id,
+                status="waiting_command",
+                conversation_open=True,
+                last_echo=transcript,
+            )
+            return
+
         answer = answer_command(camera_id, transcript, _timezone_for(camera_id))
         _close_conversation(self, camera_id)
         _speak_answer(
@@ -261,6 +291,7 @@ def install() -> None:
     def state_with_conversation(self: Any) -> dict[str, Any]:
         data = original_state(self)
         data["conversation_seconds"] = WAKE_CONVERSATION_SECONDS
+        data["followup_guard_seconds"] = WAKE_FOLLOWUP_GUARD_SECONDS
         data["simple_commands"] = [
             "Quem sou eu?",
             "Quem está aqui?",
