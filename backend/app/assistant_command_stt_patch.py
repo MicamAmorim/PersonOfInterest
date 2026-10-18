@@ -12,13 +12,14 @@ from .config import (
     WAKE_FALLBACK_MIN_RMS,
     WAKE_FALLBACK_STT_ENABLED,
     WAKE_MIN_RMS,
+    WAKE_WHISPER_MODEL,
 )
 
 
 COMMAND_PROMPT = (
     "Assistente Tonho em português do Brasil. Exemplos de comandos: "
     "Oi, Tonho! Que horas são? Quem sou eu? Quem está aqui? "
-    "Quem passou aqui hoje? Quando uma pessoa passou por aqui? "
+    "Quem passou por aqui hoje? Quando uma pessoa passou por aqui? "
     "Quantas pessoas passaram hoje? Tem alguém desconhecido?"
 )
 
@@ -44,13 +45,7 @@ def _merge_wake_and_command(fast: str, command: str) -> str:
 
 
 def _eligible_for_wake_probe(fast: str, rms: float) -> bool:
-    """Cheap gate before asking the base model to rescue a missed wake word.
-
-    The gate intentionally accepts short, clear speech even when tiny mangles the
-    words completely (for example "Oito em André..." for "Oi, Tonho..."). The
-    stronger model still has to independently hear the actual wake phrase, so a
-    tiny transcript alone can never activate Tonho.
-    """
+    """Cheap gate before asking the stronger model to rescue a missed wake."""
     if not WAKE_FALLBACK_STT_ENABLED or rms < WAKE_FALLBACK_MIN_RMS:
         return False
     normalized = ww.normalize_phrase(fast)
@@ -61,36 +56,29 @@ def _eligible_for_wake_probe(fast: str, rms: float) -> bool:
 def _ensure_command_runtime(manager: Any) -> None:
     if not hasattr(manager, "_poi_command_model"):
         manager._poi_command_model = None
-    if not hasattr(manager, "_poi_command_model_lock"):
-        manager._poi_command_model_lock = threading.Lock()
+    if not hasattr(manager, "_poi_command_model_name"):
+        manager._poi_command_model_name = None
     if not hasattr(manager, "_poi_last_fallback_probe"):
         manager._poi_last_fallback_probe = {}
 
 
-def _ensure_command_model(manager: Any) -> Any:
+def _ensure_command_model(manager: Any, model_name: str | None = None) -> Any:
     _ensure_command_runtime(manager)
-    if manager._poi_command_model is not None:
-        return manager._poi_command_model
-    if not ww.WAKE_RUNTIME_AVAILABLE:
-        raise RuntimeError(ww.WAKE_RUNTIME_ERROR or "faster-whisper indisponível")
-    with manager._poi_command_model_lock:
-        if manager._poi_command_model is None:
-            previous = manager.status
-            manager.status = "loading_command_model"
-            try:
-                manager._poi_command_model = ww.WhisperModel(
-                    WAKE_COMMAND_WHISPER_MODEL,
-                    device="cpu",
-                    compute_type="int8",
-                )
-            finally:
-                if manager.status == "loading_command_model":
-                    manager.status = previous if previous not in {"stopped", "error"} else "running"
-    return manager._poi_command_model
+    name = str(model_name or WAKE_COMMAND_WHISPER_MODEL).strip().lower()
+    model = manager._ensure_model(name)
+    manager._poi_command_model = model
+    manager._poi_command_model_name = name
+    return model
 
 
-def _transcribe_base(manager: Any, audio: Any, *, command_context: bool) -> str:
-    model = _ensure_command_model(manager)
+def _transcribe_base(
+    manager: Any,
+    audio: Any,
+    *,
+    command_context: bool,
+    model_name: str | None = None,
+) -> str:
+    model = _ensure_command_model(manager, model_name)
     kwargs: dict[str, Any] = {
         "language": "pt",
         "beam_size": 3,
@@ -99,18 +87,23 @@ def _transcribe_base(manager: Any, audio: Any, *, command_context: bool) -> str:
         "vad_filter": True,
         "condition_on_previous_text": False,
     }
-    # Full command context is helpful after wake. During a rescue probe we keep
-    # the prompt neutral so it cannot bias unrelated speech toward "Oi, Tonho".
-    kwargs["initial_prompt"] = COMMAND_PROMPT if command_context else "Português do Brasil. Transcrição literal."
-    with manager._poi_command_model_lock:
+    kwargs["initial_prompt"] = (
+        COMMAND_PROMPT if command_context else "Português do Brasil. Transcrição literal."
+    )
+    with manager.model_lock:
         segments, _ = model.transcribe(audio, **kwargs)
         return " ".join(
             segment.text.strip() for segment in segments if segment.text.strip()
         ).strip()
 
 
-def _transcribe_command(manager: Any, audio: Any) -> str:
-    return _transcribe_base(manager, audio, command_context=True)
+def _transcribe_command(manager: Any, audio: Any, model_name: str | None = None) -> str:
+    return _transcribe_base(
+        manager,
+        audio,
+        command_context=True,
+        model_name=model_name,
+    )
 
 
 def _can_probe_now(manager: Any, camera_id: int) -> bool:
@@ -124,12 +117,7 @@ def _can_probe_now(manager: Any, camera_id: int) -> bool:
 
 
 def install() -> None:
-    """Use tiny first, but never make it a single point of failure.
-
-    Tiny remains the cheap continuous listener. The base model handles commands
-    after activation and may also perform a throttled rescue probe on short,
-    clear speech when tiny fails to hear the wake phrase.
-    """
+    """Use the selected fast model first and selected command model after wake."""
     cls = ww.WakeWordManager
     if getattr(cls, "_poi_dual_stt_patch", False):
         return
@@ -138,18 +126,24 @@ def install() -> None:
     original_process = cls._process_audio_window
     original_state = cls.state
 
-    def transcribe_with_override(self: Any, audio: Any) -> str:
+    def transcribe_with_override(
+        self: Any,
+        audio: Any,
+        model_name: str | None = None,
+    ) -> str:
         override = getattr(_thread_local, "transcript_override", None)
         if override is not None:
             return str(override)
-        return original_transcribe(self, audio)
+        return original_transcribe(self, audio, model_name)
 
     def process_with_dual_stt(self: Any, camera: dict[str, Any], audio: Any) -> None:
         camera_id = int(camera["id"])
+        wake_model = str(camera.get("wake_model") or WAKE_WHISPER_MODEL).strip().lower()
+        command_model = str(camera.get("command_model") or WAKE_COMMAND_WHISPER_MODEL).strip().lower()
 
-        # If the conversation state machine is deliberately ignoring the tail of
-        # Tonho's own TTS, avoid spending CPU on either Whisper model.
-        mute_until = float(getattr(self, "_poi_audio_mute_until", {}).get(camera_id, 0.0) or 0.0)
+        mute_until = float(
+            getattr(self, "_poi_audio_mute_until", {}).get(camera_id, 0.0) or 0.0
+        )
         if time.monotonic() < mute_until:
             return original_process(self, camera, audio)
 
@@ -163,9 +157,16 @@ def install() -> None:
             rms = 0.0
 
         try:
-            fast = original_transcribe(self, audio)
-        except Exception:
-            return original_process(self, camera, audio)
+            fast = original_transcribe(self, audio, wake_model)
+        except Exception as exc:
+            self._set_camera_state(
+                camera_id,
+                status="error",
+                error=str(exc),
+                wake_model=wake_model,
+                command_model=command_model,
+            )
+            return
 
         if not fast:
             return
@@ -173,7 +174,7 @@ def install() -> None:
         wake_hit = ww.matches_wake_phrase(fast)
         conversation_open = _conversation_is_open(self, camera_id)
         chosen = fast
-        route = "tiny"
+        route = wake_model
         command_text: str | None = None
         wake_probe_text: str | None = None
         rescued_wake = False
@@ -184,51 +185,57 @@ def install() -> None:
                     camera_id,
                     status="transcribing_command",
                     last_fast_transcript=fast,
-                    command_model=WAKE_COMMAND_WHISPER_MODEL,
+                    wake_model=wake_model,
+                    command_model=command_model,
+                    error=None,
                 )
-                command_text = _transcribe_command(self, audio)
+                command_text = _transcribe_command(self, audio, command_model)
                 chosen = _merge_wake_and_command(fast, command_text)
-                route = f"{WAKE_COMMAND_WHISPER_MODEL}_command"
+                route = f"{command_model}_command"
             except Exception as exc:
                 self._set_camera_state(
                     camera_id,
                     command_model_error=str(exc),
                     last_fast_transcript=fast,
+                    wake_model=wake_model,
+                    command_model=command_model,
                 )
                 chosen = fast
-                route = "tiny_fallback"
+                route = f"{wake_model}_fallback"
         elif _eligible_for_wake_probe(fast, rms) and _can_probe_now(self, camera_id):
             try:
                 self._set_camera_state(
                     camera_id,
                     status="checking_wake",
                     last_fast_transcript=fast,
-                    command_model=WAKE_COMMAND_WHISPER_MODEL,
+                    wake_model=wake_model,
+                    command_model=command_model,
                 )
-                wake_probe_text = _transcribe_base(self, audio, command_context=False)
+                wake_probe_text = _transcribe_base(
+                    self,
+                    audio,
+                    command_context=False,
+                    model_name=command_model,
+                )
                 rescued_wake = ww.matches_wake_phrase(wake_probe_text)
                 if rescued_wake:
-                    # The base transcript is already the best transcription of
-                    # this exact window, so let the normal conversation state
-                    # machine process it as if tiny had heard the wake word.
                     chosen = wake_probe_text
                     command_text = wake_probe_text
-                    route = f"{WAKE_COMMAND_WHISPER_MODEL}_wake_rescue"
+                    route = f"{command_model}_wake_rescue"
                 else:
-                    route = f"{WAKE_COMMAND_WHISPER_MODEL}_wake_probe_miss"
+                    route = f"{command_model}_wake_probe_miss"
             except Exception as exc:
                 self._set_camera_state(camera_id, command_model_error=str(exc))
-                route = "tiny_probe_error"
+                route = f"{wake_model}_probe_error"
 
-        # Clear stale command diagnostics when this window did not activate or
-        # continue a conversation. This makes the status JSON describe the most
-        # recent attempt instead of an older successful question.
         state_updates: dict[str, Any] = {
             "last_fast_transcript": fast,
             "last_command_transcript": command_text,
             "last_wake_probe_transcript": wake_probe_text,
             "last_wake_probe_matched": rescued_wake,
             "last_stt_route": route,
+            "wake_model": wake_model,
+            "command_model": command_model,
         }
         if not (wake_hit or conversation_open or rescued_wake):
             state_updates.update(
@@ -247,14 +254,15 @@ def install() -> None:
     def state_with_dual_stt(self: Any) -> dict[str, Any]:
         data = original_state(self)
         _ensure_command_runtime(self)
-        data["wake_model"] = data.get("model")
+        loaded = set(data.get("loaded_models") or [])
+        data["wake_model"] = WAKE_WHISPER_MODEL
         data["command_model"] = WAKE_COMMAND_WHISPER_MODEL
-        data["command_model_loaded"] = self._poi_command_model is not None
+        data["command_model_loaded"] = WAKE_COMMAND_WHISPER_MODEL in loaded
         data["dual_stt"] = True
         data["wake_fallback_enabled"] = WAKE_FALLBACK_STT_ENABLED
         data["wake_fallback_min_rms"] = WAKE_FALLBACK_MIN_RMS
         data["wake_fallback_max_words"] = WAKE_FALLBACK_MAX_WORDS
-        data["hotfix"] = "4.5.4"
+        data["hotfix"] = "4.7"
         return data
 
     cls._transcribe = transcribe_with_override
