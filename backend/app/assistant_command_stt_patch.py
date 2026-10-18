@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from . import wake_word as ww
-from .config import WAKE_COMMAND_WHISPER_MODEL
+from .config import WAKE_COMMAND_WHISPER_MODEL, WAKE_MIN_RMS
 
 
 COMMAND_PROMPT = (
@@ -107,12 +107,19 @@ def install() -> None:
     def process_with_dual_stt(self: Any, camera: dict[str, Any], audio: Any) -> None:
         camera_id = int(camera["id"])
 
-        # The existing state machine performs RMS/VAD checks too, but we need a
-        # first tiny transcript here to decide whether the expensive command STT
-        # is warranted. Keep failures non-fatal and fall back to the old path.
+        # Avoid invoking Whisper on silent windows. The original state machine
+        # uses the same threshold; doing it here keeps the always-on tiny path
+        # as cheap as V4.4.
+        if audio is None or getattr(audio, "size", 0) == 0:
+            return original_process(self, camera, audio)
         try:
-            if audio is None or getattr(audio, "size", 0) == 0:
+            rms = float(ww.np.sqrt(ww.np.mean(ww.np.square(audio))))
+            if rms < WAKE_MIN_RMS:
                 return original_process(self, camera, audio)
+        except Exception:
+            pass
+
+        try:
             fast = original_transcribe(self, audio)
         except Exception:
             return original_process(self, camera, audio)
