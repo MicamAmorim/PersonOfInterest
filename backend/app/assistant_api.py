@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .assistant import manager as assistant_manager
+from .assistant_lab import analyze_audio as analyze_lab_audio
+from .assistant_lab import analyze_text as analyze_lab_text
 from .wake_word import manager as wake_word_manager
 
 
@@ -22,6 +25,13 @@ class AssistantSettingsUpdate(BaseModel):
     wake_enabled: bool = False
 
 
+class TonhoLabTextRequest(BaseModel):
+    camera_id: int = Field(ge=1)
+    text: str = Field(min_length=1, max_length=500)
+    require_wake: bool = False
+    speak: bool = False
+
+
 def _warm_wake_model() -> None:
     try:
         wake_word_manager._ensure_model()
@@ -33,6 +43,11 @@ def _warm_wake_model() -> None:
 def assistant_status() -> dict:
     state = assistant_manager.state()
     state["wake_word"] = wake_word_manager.state()
+    state["tonho_lab"] = {
+        "available": wake_word_manager.available,
+        "url": "/tonho-lab.html",
+        "microphone_note": "Use localhost/HTTPS para o navegador liberar o microfone.",
+    }
     return state
 
 
@@ -69,6 +84,47 @@ def test_assistant_camera(camera_id: int) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/api/assistant/lab/text")
+def tonho_lab_text(payload: TonhoLabTextRequest) -> dict:
+    try:
+        return analyze_lab_text(
+            payload.camera_id,
+            payload.text,
+            require_wake=payload.require_wake,
+            speak=payload.speak,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/assistant/lab/audio")
+async def tonho_lab_audio(
+    request: Request,
+    camera_id: int,
+    require_wake: bool = True,
+    speak: bool = False,
+) -> dict:
+    payload = await request.body()
+    try:
+        return await asyncio.to_thread(
+            analyze_lab_audio,
+            camera_id,
+            payload,
+            require_wake=require_wake,
+            speak=speak,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/api/assistant/audio/{filename}", include_in_schema=False)
