@@ -9,6 +9,7 @@ from .assistant_command_stt_patch import install as _install_assistant_command_s
 from .assistant_wake_patch import install as _install_assistant_wake_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
+from .identity_manual_guard_patch import install as _install_identity_manual_guard_patch
 from .identity_safety_patch import install as _install_identity_safety_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
@@ -24,6 +25,8 @@ _install_assistant_command_stt_patch()
 _install_body_negative_backfill()
 # Face identity must never borrow another person's face from a multi-person frame.
 _install_identity_safety_patch()
+# Reindexing face evidence must never erase a human-confirmed body-only identity.
+_install_identity_manual_guard_patch()
 _install_manual_learning_patch()
 _install_ptz_safety_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
@@ -39,6 +42,7 @@ del _install_assistant_command_stt_patch
 del _install_assistant_wake_patch
 del _install_body_negative_backfill
 del _install_identity_diagnostics_patch
+del _install_identity_manual_guard_patch
 del _install_identity_safety_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
