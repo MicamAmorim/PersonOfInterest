@@ -70,7 +70,6 @@ def _movement_matches_arrow(previous: Point, current: Point, arrow_from: Point, 
     arrow = math.hypot(ax, ay)
     if movement < _MIN_CROSS_MOVE or arrow < _MIN_CROSS_MOVE:
         return False
-    # Positive cosine means the foot moved broadly in the configured direction.
     cosine = (mx * ax + my * ay) / max(_EPS, movement * arrow)
     return cosine > 0.20
 
@@ -106,11 +105,62 @@ def _parse_geometry(raw: str | None) -> dict[str, Any]:
 class SpatialAlertManager:
     def __init__(self) -> None:
         self.lock = threading.RLock()
+        self._schema_lock = threading.Lock()
+        self._schema_ready = False
         self._track_state: dict[tuple[int, int, int], dict[str, Any]] = {}
         self._rules_cache: dict[int, list[dict[str, Any]]] = {}
         self._rules_cache_at: dict[int, float] = {}
         self.last_trigger: dict[str, Any] | None = None
         self.error: str | None = None
+
+    def ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
+        with self._schema_lock:
+            if self._schema_ready:
+                return
+            with connection() as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS spatial_alert_rules (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        camera_id INTEGER NOT NULL,
+                        kind TEXT NOT NULL,
+                        geometry_json TEXT NOT NULL,
+                        zone_mode TEXT,
+                        dwell_seconds REAL NOT NULL DEFAULT 0,
+                        cooldown_seconds REAL NOT NULL DEFAULT 30,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_spatial_rules_camera_enabled
+                        ON spatial_alert_rules(camera_id, enabled);
+
+                    CREATE TABLE IF NOT EXISTS spatial_alert_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        rule_id INTEGER NOT NULL,
+                        camera_id INTEGER NOT NULL,
+                        track_id INTEGER,
+                        event_id INTEGER,
+                        trigger_kind TEXT NOT NULL,
+                        foot_x REAL NOT NULL,
+                        foot_y REAL NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(rule_id) REFERENCES spatial_alert_rules(id) ON DELETE CASCADE,
+                        FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+                        FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE SET NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_spatial_events_created
+                        ON spatial_alert_events(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_spatial_events_rule_created
+                        ON spatial_alert_events(rule_id, created_at DESC);
+                    """
+                )
+                conn.commit()
+            self._schema_ready = True
 
     def notify_change(self, camera_id: int | None = None) -> None:
         with self.lock:
@@ -120,10 +170,10 @@ class SpatialAlertManager:
             else:
                 self._rules_cache.pop(int(camera_id), None)
                 self._rules_cache_at.pop(int(camera_id), None)
-            # Geometry edits must never inherit old side/timer state.
             self._track_state.clear()
 
     def _rules_for(self, camera_id: int) -> list[dict[str, Any]]:
+        self.ensure_schema()
         now = time.monotonic()
         with self.lock:
             cached = self._rules_cache.get(camera_id)
@@ -306,6 +356,7 @@ class SpatialAlertManager:
         foot: Point,
         trigger_kind: str,
     ) -> None:
+        self.ensure_schema()
         event_id = int(track.event_id) if getattr(track, "event_id", None) else None
         now = utc_now()
         with connection() as conn:
@@ -358,22 +409,38 @@ class SpatialAlertManager:
                 body = f"{who} permaneceu dentro de {rule_name} em {camera_name}."
             else:
                 body = f"{who} permaneceu fora de {rule_name} em {camera_name}."
-            payload = {
-                "title": rule_name,
-                "body": body,
-                "url": f"/?view=timeline&event={event_id}" if event_id else "/?view=alerts",
-                "image": f"/api/events/{event_id}/snapshot" if event_id else None,
-                "tag": f"poi-spatial-{rule['id']}",
-                "event_id": event_id,
-                "camera_id": camera_id,
-                "spatial_rule_id": int(rule["id"]),
-                "trigger_kind": trigger_kind,
-            }
-            alert_manager.send_custom_push(payload)
+            payload = json.dumps(
+                {
+                    "title": rule_name,
+                    "body": body,
+                    "url": f"/?view=timeline&event={event_id}" if event_id else "/?view=alerts",
+                    "image": f"/api/events/{event_id}/snapshot" if event_id else None,
+                    "tag": f"poi-spatial-{rule['id']}",
+                    "event_id": event_id,
+                    "camera_id": camera_id,
+                    "spatial_rule_id": int(rule["id"]),
+                    "trigger_kind": trigger_kind,
+                },
+                ensure_ascii=False,
+            )
+            with connection() as conn:
+                subscriptions = conn.execute(
+                    "SELECT * FROM push_subscriptions WHERE enabled = 1 ORDER BY id"
+                ).fetchall()
+            for subscription in subscriptions:
+                status, _ = alert_manager._send(subscription, payload)
+                if status == "gone":
+                    with connection() as conn:
+                        conn.execute(
+                            "UPDATE push_subscriptions SET enabled = 0, updated_at = ? WHERE id = ?",
+                            (utc_now(), subscription["id"]),
+                        )
+                        conn.commit()
         except Exception as exc:
             self.error = f"Push espacial: {exc}"
 
     def state(self) -> dict[str, Any]:
+        self.ensure_schema()
         with connection() as conn:
             enabled = int(conn.execute(
                 "SELECT COUNT(*) FROM spatial_alert_rules WHERE enabled = 1"
