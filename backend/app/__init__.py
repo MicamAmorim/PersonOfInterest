@@ -10,6 +10,7 @@ from .assistant_wake_patch import install as _install_assistant_wake_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
+from .spatial_vision_patch import install as _install_spatial_vision_patch
 
 _install_assistant_conversation_patch()
 _install_assistant_wake_patch()
@@ -21,6 +22,8 @@ _install_assistant_command_stt_patch()
 _install_body_negative_backfill()
 _install_manual_learning_patch()
 _install_ptz_safety_patch()
+# Spatial rules only observe finished tracks; failures are isolated from vision.
+_install_spatial_vision_patch()
 
 del _install_assistant_conversation_patch
 del _install_assistant_v452_patch
@@ -30,3 +33,4 @@ del _install_assistant_wake_patch
 del _install_body_negative_backfill
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
+del _install_spatial_vision_patch
