@@ -8,6 +8,7 @@ from .assistant_model_settings_patch import install as _install_assistant_model_
 from .assistant_command_stt_patch import install as _install_assistant_command_stt_patch
 from .assistant_wake_patch import install as _install_assistant_wake_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
+from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
 from .identity_safety_patch import install as _install_identity_safety_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
@@ -27,6 +28,9 @@ _install_manual_learning_patch()
 _install_ptz_safety_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
+# Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
+# V3/V4 API router. It exports derived similarities, never raw embeddings/images.
+_install_identity_diagnostics_patch()
 
 del _install_assistant_conversation_patch
 del _install_assistant_v452_patch
@@ -34,6 +38,7 @@ del _install_assistant_model_settings_patch
 del _install_assistant_command_stt_patch
 del _install_assistant_wake_patch
 del _install_body_negative_backfill
+del _install_identity_diagnostics_patch
 del _install_identity_safety_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
