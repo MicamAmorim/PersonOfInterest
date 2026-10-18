@@ -5,47 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Tonho Lab · PersonOfInterest</title>
   <style>
-    :root { color-scheme: dark; --bg:#0c1016; --panel:#151b24; --line:#2b3544; --text:#eef3f8; --muted:#99a8b8; --accent:#67b7ff; --good:#77d99f; --warn:#ffd17a; --bad:#ff8b8b; }
-    * { box-sizing:border-box; }
-    body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
-    main { width:min(1080px,calc(100% - 28px)); margin:28px auto 64px; }
-    a { color:var(--accent); text-decoration:none; }
-    h1 { margin:.2rem 0 .4rem; font-size:clamp(1.8rem,5vw,3rem); }
-    h2 { margin:.1rem 0 1rem; font-size:1.05rem; }
-    p { line-height:1.55; }
-    .eyebrow { margin:0; color:var(--accent); font-size:.78rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
-    .muted { color:var(--muted); }
-    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:20px; }
-    .panel { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 12px 35px rgba(0,0,0,.18); }
-    .full { grid-column:1/-1; }
-    label { display:grid; gap:7px; margin-bottom:13px; color:var(--muted); font-size:.9rem; }
-    select,input[type=text] { width:100%; background:#0e141c; border:1px solid var(--line); color:var(--text); border-radius:11px; padding:11px 12px; font:inherit; }
-    .checks { display:flex; flex-wrap:wrap; gap:14px 22px; margin:10px 0 16px; }
-    .checks label { display:flex; align-items:center; gap:8px; margin:0; }
-    button { border:1px solid var(--line); border-radius:12px; padding:11px 15px; background:#1c2633; color:var(--text); font:inherit; font-weight:750; cursor:pointer; }
-    button.primary { background:var(--accent); color:#06111b; border-color:transparent; }
-    button.recording { background:#d84f5c; color:white; border-color:transparent; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; }
-    .status { min-height:24px; color:var(--muted); margin:12px 0 0; }
-    .status.good { color:var(--good); } .status.bad { color:var(--bad); } .status.warn { color:var(--warn); }
-    .result-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-    .metric { background:#0e141c; border:1px solid var(--line); border-radius:12px; padding:12px; min-height:76px; }
-    .metric span { display:block; color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
-    .metric strong { display:block; overflow-wrap:anywhere; }
-    .answer { grid-column:1/-1; border-color:#36546f; }
-    pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#090d12; border:1px solid var(--line); border-radius:12px; padding:13px; max-height:360px; overflow:auto; color:#c6d3df; }
-    code { color:#cce6ff; }
-    .examples { display:flex; flex-wrap:wrap; gap:7px; }
-    .chip { padding:7px 9px; border-radius:999px; font-size:.8rem; background:#101924; border:1px solid var(--line); cursor:pointer; }
-    @media (max-width:760px) { .grid,.result-grid { grid-template-columns:1fr; } .full,.answer { grid-column:auto; } }
+    :root{color-scheme:dark;--bg:#0c1016;--panel:#151b24;--line:#2b3544;--text:#eef3f8;--muted:#99a8b8;--accent:#67b7ff;--good:#77d99f;--warn:#ffd17a;--bad:#ff8b8b}*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}main{width:min(1080px,calc(100% - 28px));margin:28px auto 64px}a{color:var(--accent);text-decoration:none}h1{margin:.2rem 0 .4rem;font-size:clamp(1.8rem,5vw,3rem)}h2{margin:.1rem 0 1rem;font-size:1.05rem}p{line-height:1.55}.eyebrow{margin:0;color:var(--accent);font-size:.78rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:20px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 12px 35px rgba(0,0,0,.18)}.full{grid-column:1/-1}label{display:grid;gap:7px;margin-bottom:13px;color:var(--muted);font-size:.9rem}select,input[type=text]{width:100%;background:#0e141c;border:1px solid var(--line);color:var(--text);border-radius:11px;padding:11px 12px;font:inherit}.checks{display:flex;flex-wrap:wrap;gap:14px 22px;margin:10px 0 16px}.checks label{display:flex;align-items:center;gap:8px;margin:0}button{border:1px solid var(--line);border-radius:12px;padding:11px 15px;background:#1c2633;color:var(--text);font:inherit;font-weight:750;cursor:pointer}button.primary{background:var(--accent);color:#06111b;border-color:transparent}button.recording{background:#d84f5c;color:white;border-color:transparent}button:disabled{opacity:.5;cursor:not-allowed}.actions{display:flex;gap:10px;flex-wrap:wrap}.status{min-height:24px;color:var(--muted);margin:12px 0 0}.status.good{color:var(--good)}.status.bad{color:var(--bad)}.status.warn{color:var(--warn)}.model-pair{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.model-pill{padding:6px 9px;border:1px solid var(--line);border-radius:999px;background:#0e141c;font-size:.78rem;color:var(--muted)}.model-pill strong{color:var(--text)}.result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{background:#0e141c;border:1px solid var(--line);border-radius:12px;padding:12px;min-height:76px}.metric span{display:block;color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}.metric strong{display:block;overflow-wrap:anywhere}.answer{grid-column:1/-1;border-color:#36546f}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#090d12;border:1px solid var(--line);border-radius:12px;padding:13px;max-height:360px;overflow:auto;color:#c6d3df}.examples{display:flex;flex-wrap:wrap;gap:7px}.chip{padding:7px 9px;border-radius:999px;font-size:.8rem;background:#101924;border:1px solid var(--line);cursor:pointer}@media(max-width:760px){.grid,.result-grid{grid-template-columns:1fr}.full,.answer{grid-column:auto}}
   </style>
 </head>
 <body>
 <main>
-  <p class="eyebrow">PersonOfInterest · Tonho Lab</p>
+  <p class="eyebrow">PersonOfInterest · Tonho Lab V4.7</p>
   <h1>Laboratório de voz</h1>
-  <p class="muted">Use o microfone do PC para separar rapidamente problemas de <strong>wake word</strong>, transcrição e interpretação. O contexto (timeline, pessoas e fuso) continua sendo o da câmera escolhida.</p>
+  <p class="muted">Use o microfone do PC para separar problemas de wake word, transcrição e interpretação. O Lab usa exatamente os <strong>modelos configurados na câmera escolhida</strong>.</p>
   <p><a href="/">← Voltar ao PersonOfInterest</a></p>
 
   <section class="grid">
@@ -54,12 +21,13 @@
       <label>Câmera usada nas consultas
         <select id="cameraSelect"><option>Carregando…</option></select>
       </label>
+      <div id="modelPair" class="model-pair"></div>
       <div class="checks">
         <label><input id="requireWake" type="checkbox" checked /> Exigir “Oi, Tonho”</label>
         <label><input id="browserVoice" type="checkbox" checked /> Ler resposta neste PC</label>
         <label><input id="cameraVoice" type="checkbox" /> Falar resposta na câmera</label>
       </div>
-      <p class="muted">No modo real, o Lab roda <strong>tiny + base</strong>. Desmarque “Exigir Oi, Tonho” para testar apenas entendimento do comando.</p>
+      <p class="muted">Desmarque “Exigir Oi, Tonho” para isolar apenas transcrição + parser.</p>
     </article>
 
     <article class="panel">
@@ -86,190 +54,79 @@
     <article class="panel full">
       <h2>Resultado</h2>
       <div class="result-grid">
-        <div class="metric"><span>Tiny ouviu</span><strong id="fastText">—</strong></div>
-        <div class="metric"><span>Base ouviu</span><strong id="baseText">—</strong></div>
+        <div class="metric"><span id="fastLabel">Escuta ouviu</span><strong id="fastText">—</strong></div>
+        <div class="metric"><span id="commandLabel">Comando ouviu</span><strong id="baseText">—</strong></div>
         <div class="metric"><span>Wake word</span><strong id="wakeText">—</strong></div>
         <div class="metric"><span>Comando entregue ao parser</span><strong id="commandText">—</strong></div>
         <div class="metric"><span>Intent</span><strong id="intentText">—</strong></div>
         <div class="metric"><span>Latência</span><strong id="latencyText">—</strong></div>
         <div class="metric answer"><span>Resposta</span><strong id="answerText">—</strong></div>
       </div>
-      <details style="margin-top:14px">
-        <summary>JSON completo</summary>
-        <pre id="jsonOutput">Nenhum teste ainda.</pre>
-      </details>
+      <details style="margin-top:14px"><summary>JSON completo</summary><pre id="jsonOutput">Nenhum teste ainda.</pre></details>
     </article>
   </section>
 </main>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  let mediaStream = null;
-  let recorder = null;
-  let chunks = [];
-  let autoStop = null;
-
+  let mediaStream = null, recorder = null, chunks = [], autoStop = null;
+  let settings = [];
   const examples = [
-    'Oi, Tonho, que horas são?',
-    'Oi, Tonho, quem sou eu?',
-    'Oi, Tonho, quem está aqui?',
-    'Oi, Tonho, quem passou por aqui?',
-    'Oi, Tonho, quantas pessoas passaram hoje?',
-    'Oi, Tonho, tem alguém desconhecido?',
-    'Oi, Tonho, quando Andressa passou por aqui?'
+    'Oi, Tonho, que horas são?', 'Oi, Tonho, quem sou eu?', 'Oi, Tonho, quem está aqui?',
+    'Oi, Tonho, quem passou por aqui?', 'Oi, Tonho, quantas pessoas passaram hoje?',
+    'Oi, Tonho, tem alguém desconhecido?', 'Oi, Tonho, quando Andressa passou por aqui?'
   ];
 
-  function setMicStatus(text, kind='') {
-    $('micStatus').textContent = text;
-    $('micStatus').className = `status ${kind}`.trim();
+  function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));}
+  function setMicStatus(text,kind=''){ $('micStatus').textContent=text; $('micStatus').className=`status ${kind}`.trim(); }
+  async function jsonFetch(url,options={}){const r=await fetch(url,options);const t=await r.text();let d=null;try{d=t?JSON.parse(t):null}catch(_){}if(!r.ok)throw new Error(d?.detail||t||`HTTP ${r.status}`);return d;}
+  function selectedCamera(){const id=Number($('cameraSelect').value||0);if(!id)throw new Error('Escolha uma câmera para fornecer o contexto.');return id;}
+  function selectedSetting(){const id=Number($('cameraSelect').value||0);return settings.find(item=>Number(item.camera_id)===id)||null;}
+
+  function renderModels(){
+    const item=selectedSetting();
+    const wake=item?.wake_model||'base', command=item?.command_model||'small';
+    $('modelPair').innerHTML=`<span class="model-pill"><strong>escuta</strong> ${escapeHtml(wake)}</span><span class="model-pill"><strong>comando</strong> ${escapeHtml(command)}</span>`;
+    $('fastLabel').textContent=`${wake} ouviu`;
+    $('commandLabel').textContent=`${command} ouviu`;
   }
 
-  async function jsonFetch(url, options={}) {
-    const response = await fetch(url, options);
-    const text = await response.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch (_) {}
-    if (!response.ok) throw new Error(data?.detail || text || `HTTP ${response.status}`);
-    return data;
+  async function loadCameras(){
+    try{
+      settings=await jsonFetch('/api/assistant/settings')||[];
+      $('cameraSelect').innerHTML=settings.map(item=>`<option value="${Number(item.camera_id)}">${escapeHtml(item.camera_name||`Câmera ${item.camera_id}`)} · ${escapeHtml(item.wake_model||'base')} → ${escapeHtml(item.command_model||'small')}</option>`).join('')||'<option value="">Nenhuma câmera</option>';
+      renderModels();
+    }catch(error){$('cameraSelect').innerHTML='<option value="">Erro ao carregar</option>';setMicStatus(error.message,'bad');}
   }
 
-  async function loadCameras() {
-    try {
-      const settings = await jsonFetch('/api/assistant/settings');
-      $('cameraSelect').innerHTML = (settings || []).map(item =>
-        `<option value="${Number(item.camera_id)}">${escapeHtml(item.camera_name || `Câmera ${item.camera_id}`)}</option>`
-      ).join('') || '<option value="">Nenhuma câmera</option>';
-    } catch (error) {
-      $('cameraSelect').innerHTML = '<option value="">Erro ao carregar</option>';
-      setMicStatus(error.message, 'bad');
-    }
+  function renderResult(data){
+    $('fastLabel').textContent=`${data.wake_model||'escuta'} ouviu`;
+    $('commandLabel').textContent=`${data.command_model||'comando'} ouviu`;
+    $('fastText').textContent=data.fast_transcript||'—'; $('baseText').textContent=data.command_transcript||'—';
+    $('wakeText').textContent=data.wake_detected?`sim · ${data.wake_detected_by||'detectado'}`:'não';
+    $('commandText').textContent=data.command||'—'; $('intentText').textContent=data.intent||'—';
+    const p=[]; if(data.total_latency_ms!=null)p.push(`${data.total_latency_ms} ms total`); if(data.fast_latency_ms)p.push(`${data.wake_model||'escuta'} ${data.fast_latency_ms} ms`); if(data.command_latency_ms)p.push(`${data.command_model||'comando'} ${data.command_latency_ms} ms`);
+    $('latencyText').textContent=p.join(' · ')||'—'; $('answerText').textContent=data.answer||'—'; $('jsonOutput').textContent=JSON.stringify(data,null,2);
+    if($('browserVoice').checked&&data.answer&&data.intent!=='no_wake'&&'speechSynthesis'in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(data.answer);u.lang='pt-BR';speechSynthesis.speak(u);}
   }
 
-  function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+  function queryParams(){return{cameraId:selectedCamera(),requireWake:$('requireWake').checked,speak:$('cameraVoice').checked};}
+  async function sendAudio(blob){const{cameraId,requireWake,speak}=queryParams();const s=selectedSetting();setMicStatus(`Processando ${(s?.wake_model||'base')} + ${(s?.command_model||'small')}…`,'warn');const data=await jsonFetch(`/api/assistant/lab/audio?camera_id=${cameraId}&require_wake=${requireWake}&speak=${speak}`,{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream'},body:blob});renderResult(data);setMicStatus(data.intent==='no_wake'?'Wake word não detectado.':'Teste concluído.',data.intent==='no_wake'?'warn':'good');}
+
+  async function startRecording(){
+    try{
+      selectedCamera(); if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw new Error('Este navegador não oferece captura de microfone compatível.');
+      mediaStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      const candidates=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];const mimeType=candidates.find(type=>MediaRecorder.isTypeSupported(type))||'';
+      recorder=mimeType?new MediaRecorder(mediaStream,{mimeType}):new MediaRecorder(mediaStream);chunks=[];recorder.ondataavailable=e=>{if(e.data?.size)chunks.push(e.data)};
+      recorder.onstop=async()=>{clearTimeout(autoStop);$('recordBtn').disabled=false;$('recordBtn').classList.remove('recording');$('recordBtn').textContent='🎙 Iniciar gravação';$('stopBtn').disabled=true;const type=recorder?.mimeType||mimeType||'audio/webm';const blob=new Blob(chunks,{type});mediaStream?.getTracks().forEach(t=>t.stop());mediaStream=null;recorder=null;try{await sendAudio(blob)}catch(error){setMicStatus(`Falha: ${error.message}`,'bad')}};
+      recorder.start();$('recordBtn').disabled=true;$('recordBtn').classList.add('recording');$('recordBtn').textContent='● Gravando…';$('stopBtn').disabled=false;setMicStatus('Gravando. Fale normalmente…','good');autoStop=setTimeout(stopRecording,8000);
+    }catch(error){mediaStream?.getTracks().forEach(t=>t.stop());mediaStream=null;setMicStatus(`Microfone: ${error.message}`,'bad');}
   }
+  function stopRecording(){if(recorder&&recorder.state!=='inactive')recorder.stop();}
+  async function testText(){try{const{cameraId,requireWake,speak}=queryParams();const text=$('textInput').value.trim();if(!text)throw new Error('Digite uma frase.');setMicStatus('Testando parser…','warn');const data=await jsonFetch('/api/assistant/lab/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({camera_id:cameraId,text,require_wake:requireWake,speak})});renderResult(data);setMicStatus('Teste de texto concluído.','good')}catch(error){setMicStatus(`Falha: ${error.message}`,'bad')}}
 
-  function selectedCamera() {
-    const id = Number($('cameraSelect').value || 0);
-    if (!id) throw new Error('Escolha uma câmera para fornecer o contexto.');
-    return id;
-  }
-
-  function renderResult(data) {
-    $('fastText').textContent = data.fast_transcript || '—';
-    $('baseText').textContent = data.command_transcript || '—';
-    $('wakeText').textContent = data.wake_detected
-      ? `sim · ${data.wake_detected_by || 'detectado'}`
-      : 'não';
-    $('commandText').textContent = data.command || '—';
-    $('intentText').textContent = data.intent || '—';
-    const pieces = [];
-    if (data.total_latency_ms != null) pieces.push(`${data.total_latency_ms} ms total`);
-    if (data.fast_latency_ms) pieces.push(`tiny ${data.fast_latency_ms} ms`);
-    if (data.command_latency_ms) pieces.push(`base ${data.command_latency_ms} ms`);
-    $('latencyText').textContent = pieces.join(' · ') || '—';
-    $('answerText').textContent = data.answer || '—';
-    $('jsonOutput').textContent = JSON.stringify(data, null, 2);
-
-    if ($('browserVoice').checked && data.answer && data.intent !== 'no_wake' && 'speechSynthesis' in window) {
-      speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(data.answer);
-      utterance.lang = 'pt-BR';
-      speechSynthesis.speak(utterance);
-    }
-  }
-
-  function queryParams() {
-    const cameraId = selectedCamera();
-    const requireWake = $('requireWake').checked;
-    const speak = $('cameraVoice').checked;
-    return { cameraId, requireWake, speak };
-  }
-
-  async function sendAudio(blob) {
-    const { cameraId, requireWake, speak } = queryParams();
-    setMicStatus('Processando tiny + base…', 'warn');
-    const url = `/api/assistant/lab/audio?camera_id=${cameraId}&require_wake=${requireWake}&speak=${speak}`;
-    const data = await jsonFetch(url, {
-      method:'POST',
-      headers:{'Content-Type': blob.type || 'application/octet-stream'},
-      body:blob
-    });
-    renderResult(data);
-    setMicStatus(data.intent === 'no_wake' ? 'Wake word não detectado.' : 'Teste concluído.', data.intent === 'no_wake' ? 'warn' : 'good');
-  }
-
-  async function startRecording() {
-    try {
-      selectedCamera();
-      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-        throw new Error('Este navegador não oferece captura de microfone compatível.');
-      }
-      mediaStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-      const candidates = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];
-      const mimeType = candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
-      recorder = mimeType ? new MediaRecorder(mediaStream, {mimeType}) : new MediaRecorder(mediaStream);
-      chunks = [];
-      recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
-      recorder.onstop = async () => {
-        clearTimeout(autoStop);
-        $('recordBtn').disabled = false;
-        $('recordBtn').classList.remove('recording');
-        $('recordBtn').textContent = '🎙 Iniciar gravação';
-        $('stopBtn').disabled = true;
-        const type = recorder?.mimeType || mimeType || 'audio/webm';
-        const blob = new Blob(chunks, {type});
-        mediaStream?.getTracks().forEach(track => track.stop());
-        mediaStream = null;
-        recorder = null;
-        try { await sendAudio(blob); }
-        catch (error) { setMicStatus(`Falha: ${error.message}`, 'bad'); }
-      };
-      recorder.start();
-      $('recordBtn').disabled = true;
-      $('recordBtn').classList.add('recording');
-      $('recordBtn').textContent = '● Gravando…';
-      $('stopBtn').disabled = false;
-      setMicStatus('Gravando. Fale normalmente…', 'good');
-      autoStop = setTimeout(stopRecording, 8000);
-    } catch (error) {
-      mediaStream?.getTracks().forEach(track => track.stop());
-      mediaStream = null;
-      setMicStatus(`Microfone: ${error.message}`, 'bad');
-    }
-  }
-
-  function stopRecording() {
-    if (recorder && recorder.state !== 'inactive') recorder.stop();
-  }
-
-  async function testText() {
-    try {
-      const { cameraId, requireWake, speak } = queryParams();
-      const text = $('textInput').value.trim();
-      if (!text) throw new Error('Digite uma frase.');
-      setMicStatus('Testando parser…', 'warn');
-      const data = await jsonFetch('/api/assistant/lab/text', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({camera_id:cameraId,text,require_wake:requireWake,speak})
-      });
-      renderResult(data);
-      setMicStatus('Teste de texto concluído.', 'good');
-    } catch (error) {
-      setMicStatus(`Falha: ${error.message}`, 'bad');
-    }
-  }
-
-  $('recordBtn').addEventListener('click', startRecording);
-  $('stopBtn').addEventListener('click', stopRecording);
-  $('textBtn').addEventListener('click', testText);
-  $('textInput').addEventListener('keydown', event => { if (event.key === 'Enter') testText(); });
-  $('examples').innerHTML = examples.map(text => `<button type="button" class="chip">${escapeHtml(text)}</button>`).join('');
-  [...$('examples').querySelectorAll('.chip')].forEach((button, index) => {
-    button.addEventListener('click', () => { $('textInput').value = examples[index]; });
-  });
-
+  $('cameraSelect').addEventListener('change',renderModels);$('recordBtn').addEventListener('click',startRecording);$('stopBtn').addEventListener('click',stopRecording);$('textBtn').addEventListener('click',testText);$('textInput').addEventListener('keydown',e=>{if(e.key==='Enter')testText()});$('examples').innerHTML=examples.map(text=>`<button type="button" class="chip">${escapeHtml(text)}</button>`).join('');[...$('examples').querySelectorAll('.chip')].forEach((button,index)=>button.addEventListener('click',()=>{$('textInput').value=examples[index]}));
   loadCameras();
 })();
 </script>
