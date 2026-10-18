@@ -33,6 +33,8 @@ from .models import (
     VisionFollowRequest,
     VisionSettingsUpdate,
 )
+from .spatial_alerts import manager as spatial_alert_manager
+from .spatial_alerts_api import router as spatial_alert_router
 from .vision import manager as vision_manager
 
 
@@ -98,6 +100,7 @@ async def sync_camera(camera_id: int) -> CameraOut:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    spatial_alert_manager.ensure_schema()
     identity_manager.start()
     body_identity_manager.start()
     alert_manager.start()
@@ -122,6 +125,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
 app.include_router(v34_router)
 app.include_router(assistant_router)
+app.include_router(spatial_alert_router)
 
 
 @app.get("/api/health")
@@ -139,6 +143,7 @@ async def health() -> dict:
         "body_reid_error": body_identity_manager.error,
         "alerts": alert_manager.status,
         "alerts_error": alert_manager.error,
+        "spatial_alerts": spatial_alert_manager.state(),
         "assistant": assistant_manager.status,
         "assistant_error": assistant_manager.error,
     }
