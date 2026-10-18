@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.6"
+APP_VERSION = "0.4.7"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -74,13 +74,19 @@ ASSISTANT_POLL_SECONDS = float(os.getenv("ASSISTANT_POLL_SECONDS", "1.0"))
 ASSISTANT_SETTLE_SECONDS = float(os.getenv("ASSISTANT_SETTLE_SECONDS", "12.0"))
 ASSISTANT_UNKNOWN_FACE_QUALITY = float(os.getenv("ASSISTANT_UNKNOWN_FACE_QUALITY", "0.72"))
 
-# V4.4-V4.6 local voice activation, deterministic conversation and Tonho Lab.
-# Tiny stays always-on as the cheap first pass. Base handles commands and may
-# rescue a missed wake word on short, clear speech. Tonho Lab runs both models
-# against the PC microphone to diagnose wake/STT/parser independently.
+# V4.4-V4.7 local voice activation, deterministic conversation and Tonho Lab.
+# V4.7 defaults to base for the always-on wake transcript and small for commands.
+# Model selection is stored per camera. faster-whisper automatically downloads a
+# selected model on first load if it is not already in the local cache.
 WAKE_PHRASE = os.getenv("WAKE_PHRASE", "Oi, Tonho!")
-WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "tiny")
-WAKE_COMMAND_WHISPER_MODEL = os.getenv("WAKE_COMMAND_WHISPER_MODEL", "base")
+WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "base").strip().lower()
+WAKE_COMMAND_WHISPER_MODEL = os.getenv("WAKE_COMMAND_WHISPER_MODEL", "small").strip().lower()
+WHISPER_WAKE_MODELS = ("tiny", "base", "small")
+WHISPER_COMMAND_MODELS = ("base", "small", "medium")
+if WAKE_WHISPER_MODEL not in WHISPER_WAKE_MODELS:
+    WAKE_WHISPER_MODEL = "base"
+if WAKE_COMMAND_WHISPER_MODEL not in WHISPER_COMMAND_MODELS:
+    WAKE_COMMAND_WHISPER_MODEL = "small"
 WAKE_CHUNK_SECONDS = float(os.getenv("WAKE_CHUNK_SECONDS", "4.0"))
 WAKE_OVERLAP_SECONDS = float(os.getenv("WAKE_OVERLAP_SECONDS", "0.8"))
 WAKE_MIN_RMS = float(os.getenv("WAKE_MIN_RMS", "0.004"))
@@ -99,7 +105,6 @@ VAPID_PRIVATE_KEY_PATH = Path(
     os.getenv("VAPID_PRIVATE_KEY_PATH", str(VAPID_DIR / "private_key.pem"))
 ).resolve()
 VAPID_PUBLIC_KEY_PATH = Path(
-    os.getenv("VAPID_PUBLIC_KEY_PATH", str(VAPID_DIR / "public_key.txt"))
-).resolve()
+    os.getenv("VAPID_PUBLIC_KEY_PATH", str(VAPID_DIR / "vapid" / "public_key.txt"))).resolve()
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:personofinterest@local.invalid")
 ALERT_POLL_SECONDS = float(os.getenv("ALERT_POLL_SECONDS", "1.0"))
