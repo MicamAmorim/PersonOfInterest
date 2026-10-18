@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.5.4"
+APP_VERSION = "0.4.6"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
@@ -74,10 +74,10 @@ ASSISTANT_POLL_SECONDS = float(os.getenv("ASSISTANT_POLL_SECONDS", "1.0"))
 ASSISTANT_SETTLE_SECONDS = float(os.getenv("ASSISTANT_SETTLE_SECONDS", "12.0"))
 ASSISTANT_UNKNOWN_FACE_QUALITY = float(os.getenv("ASSISTANT_UNKNOWN_FACE_QUALITY", "0.72"))
 
-# V4.4/V4.5 local voice activation and short deterministic conversation.
-# Tiny stays always-on as the cheap first pass. Base handles commands and V4.5.4
-# may also rescue a missed wake word on short, clear speech. The base model is
-# preloaded in the background only when a persisted wake listener is enabled.
+# V4.4-V4.6 local voice activation, deterministic conversation and Tonho Lab.
+# Tiny stays always-on as the cheap first pass. Base handles commands and may
+# rescue a missed wake word on short, clear speech. Tonho Lab runs both models
+# against the PC microphone to diagnose wake/STT/parser independently.
 WAKE_PHRASE = os.getenv("WAKE_PHRASE", "Oi, Tonho!")
 WAKE_WHISPER_MODEL = os.getenv("WAKE_WHISPER_MODEL", "tiny")
 WAKE_COMMAND_WHISPER_MODEL = os.getenv("WAKE_COMMAND_WHISPER_MODEL", "base")
