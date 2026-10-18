@@ -141,9 +141,9 @@ def _speak_answer(
         assistant_manager.speak(camera_id, response, voice_gender=voice_gender)
         manager._last_trigger_monotonic[camera_id] = time.monotonic()
 
-        # Final answers keep the conservative half-duplex guard. The short
-        # "Pode falar" prompt uses a much smaller guard and an echo detector,
-        # otherwise a natural immediate follow-up is discarded.
+        # Echo is filtered separately, so guards remain deliberately short.
+        # If a command was not understood we reopen the command window rather
+        # than forcing the user to say the wake phrase again.
         mute_seconds = WAKE_FOLLOWUP_GUARD_SECONDS if open_conversation else WAKE_AFTER_SPEECH_MUTE_SECONDS
         mute_until = _set_mute(manager, camera_id, mute_seconds)
         if open_conversation:
@@ -222,6 +222,7 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
         command_text = _extract_command_after_wake(transcript)
         if command_text:
             answer = answer_command(camera_id, command_text, _timezone_for(camera_id))
+            retry = answer.intent in {"unknown", "empty"}
             _speak_answer(
                 self,
                 camera,
@@ -231,7 +232,7 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
                 answer.person_id,
                 intent=answer.intent,
                 follow_up=False,
-                open_conversation=False,
+                open_conversation=retry,
             )
             return
 
@@ -263,6 +264,7 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
             return
 
         answer = answer_command(camera_id, transcript, _timezone_for(camera_id))
+        retry = answer.intent in {"unknown", "empty"}
         _close_conversation(self, camera_id)
         _speak_answer(
             self,
@@ -273,7 +275,7 @@ def _process_audio_window(self: Any, camera: dict[str, Any], audio: Any) -> None
             answer.person_id,
             intent=answer.intent,
             follow_up=True,
-            open_conversation=False,
+            open_conversation=retry,
         )
         return
 
