@@ -10,8 +10,8 @@ from .assistant import AssistantManager
 def install() -> None:
     """Attach the local wake listener to the existing assistant lifecycle.
 
-    Import wake_word lazily inside start/stop so package initialization does not
-    introduce an assistant <-> wake_word circular import.
+    Import wake modules lazily inside start/stop so package initialization does
+    not introduce an assistant <-> wake_word circular import.
     """
     cls = AssistantManager
     if getattr(cls, "_poi_wake_lifecycle_patch", False):
@@ -26,15 +26,26 @@ def install() -> None:
         wake_word_manager.start()
 
         def warm_persisted_listener() -> None:
-            # assistant starts before startup camera sync. Give sync a short
-            # window, then preload Whisper only when a saved wake listener is
-            # actually active so normal users pay no model cost.
+            # Assistant starts before startup camera sync. Give sync a short
+            # window, then preload both STT models only when a saved wake
+            # listener is actually active. This keeps normal installs light and
+            # removes the first-question model-load delay for Tonho users.
             for _ in range(24):
                 if wake_word_manager.stop_event.is_set():
                     return
                 try:
                     if wake_word_manager._enabled_cameras():
                         wake_word_manager._ensure_model()
+                        try:
+                            from .assistant_command_stt_patch import _ensure_command_model
+                            _ensure_command_model(wake_word_manager)
+                        except Exception as exc:
+                            # Wake detection must remain available even if the
+                            # stronger model cannot be preloaded yet.
+                            wake_word_manager._set_camera_state(
+                                next(iter(wake_word_manager._enabled_cameras())),
+                                command_model_error=str(exc),
+                            )
                         return
                 except Exception as exc:
                     wake_word_manager.error = str(exc)
