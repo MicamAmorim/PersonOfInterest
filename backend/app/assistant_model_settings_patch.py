@@ -106,12 +106,26 @@ def install() -> None:
             WHISPER_COMMAND_MODELS,
             WAKE_COMMAND_WHISPER_MODEL,
         )
+        models_changed = (
+            str(current.get("wake_model")) != selected_wake
+            or str(current.get("command_model")) != selected_command
+        )
         with connection() as conn:
             conn.execute(
                 "UPDATE camera_wake_settings SET wake_model = ?, command_model = ?, updated_at = ? WHERE camera_id = ?",
                 (selected_wake, selected_command, utc_now(), camera_id),
             )
             conn.commit()
+
+        # Worker camera configuration is a snapshot. Restart only this listener
+        # when models change so the new selection takes effect without requiring
+        # a full PersonOfInterest restart.
+        if models_changed:
+            with self.lock:
+                worker = self._workers.pop(camera_id, None)
+            if worker is not None:
+                _, stop = worker
+                stop.set()
         self.notify_change()
         return settings_for_with_models(self, camera_id)
 
@@ -169,7 +183,6 @@ def install() -> None:
                 model = ww.WhisperModel(name, device="cpu", compute_type="int8")
                 self._poi_model_cache[name] = model
                 self._poi_model_states[name] = {"status": "loaded", "error": None, "updated_at": utc_now()}
-                # Keep the legacy pointer useful for code that only checks it.
                 if name == WAKE_WHISPER_MODEL:
                     self._model = model
                 return model
