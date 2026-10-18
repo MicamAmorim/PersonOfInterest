@@ -8,11 +8,7 @@ from .assistant import AssistantManager
 
 
 def install() -> None:
-    """Attach the local wake listener to the existing assistant lifecycle.
-
-    Import wake modules lazily inside start/stop so package initialization does
-    not introduce an assistant <-> wake_word circular import.
-    """
+    """Attach the local wake listener to the existing assistant lifecycle."""
     cls = AssistantManager
     if getattr(cls, "_poi_wake_lifecycle_patch", False):
         return
@@ -26,26 +22,34 @@ def install() -> None:
         wake_word_manager.start()
 
         def warm_persisted_listener() -> None:
-            # Assistant starts before startup camera sync. Give sync a short
-            # window, then preload both STT models only when a saved wake
-            # listener is actually active. This keeps normal installs light and
-            # removes the first-question model-load delay for Tonho users.
+            # Camera sync happens after assistant startup. Once active cameras are
+            # known, preload each selected pair. WhisperModel downloads a model
+            # automatically on first use when it is not present in local cache.
             for _ in range(24):
                 if wake_word_manager.stop_event.is_set():
                     return
                 try:
-                    if wake_word_manager._enabled_cameras():
-                        wake_word_manager._ensure_model()
-                        try:
-                            from .assistant_command_stt_patch import _ensure_command_model
-                            _ensure_command_model(wake_word_manager)
-                        except Exception as exc:
-                            # Wake detection must remain available even if the
-                            # stronger model cannot be preloaded yet.
-                            wake_word_manager._set_camera_state(
-                                next(iter(wake_word_manager._enabled_cameras())),
-                                command_model_error=str(exc),
-                            )
+                    cameras = wake_word_manager._enabled_cameras()
+                    if cameras:
+                        from .assistant_command_stt_patch import _ensure_command_model
+
+                        seen_wake: set[str] = set()
+                        seen_command: set[str] = set()
+                        for camera_id, camera in cameras.items():
+                            wake_model = str(camera.get("wake_model") or "base")
+                            command_model = str(camera.get("command_model") or "small")
+                            try:
+                                if wake_model not in seen_wake:
+                                    wake_word_manager._ensure_model(wake_model)
+                                    seen_wake.add(wake_model)
+                                if command_model not in seen_command:
+                                    _ensure_command_model(wake_word_manager, command_model)
+                                    seen_command.add(command_model)
+                            except Exception as exc:
+                                wake_word_manager._set_camera_state(
+                                    camera_id,
+                                    model_preload_error=str(exc),
+                                )
                         return
                 except Exception as exc:
                     wake_word_manager.error = str(exc)
