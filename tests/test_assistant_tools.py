@@ -9,6 +9,13 @@ from app.assistant_tools import detect_intent, normalize_text
 from app.assistant_conversation_patch import _extract_command_after_wake
 from app.assistant_v452_patch import _merge_partial_command, looks_like_time_request
 from app.assistant_command_stt_patch import _eligible_for_wake_probe, _merge_wake_and_command
+from app.assistant_model_settings_patch import _validate_model
+from app.config import (
+    WAKE_COMMAND_WHISPER_MODEL,
+    WAKE_WHISPER_MODEL,
+    WHISPER_COMMAND_MODELS,
+    WHISPER_WAKE_MODELS,
+)
 
 
 class AssistantToolTests(unittest.TestCase):
@@ -81,7 +88,7 @@ class AssistantToolTests(unittest.TestCase):
         self.assertFalse(looks_like_time_request("Oi Tonho que"))
         self.assertTrue(looks_like_time_request("que horas são"))
 
-    def test_dual_stt_preserves_wake_from_tiny(self):
+    def test_dual_stt_preserves_wake_from_fast_model(self):
         merged = _merge_wake_and_command(
             "Oi, Tonho! Queria, Tonho!",
             "Que horas são?",
@@ -90,14 +97,14 @@ class AssistantToolTests(unittest.TestCase):
         self.assertIn("Que horas são?", merged)
         self.assertTrue(looks_like_time_request(merged))
 
-    def test_dual_stt_keeps_command_wake_when_base_hears_it(self):
+    def test_dual_stt_keeps_command_wake_when_stronger_model_hears_it(self):
         merged = _merge_wake_and_command(
             "Oi Tonho",
             "Oi, Tonho, quem está aqui?",
         )
         self.assertEqual(merged, "Oi, Tonho, quem está aqui?")
 
-    def test_wake_rescue_accepts_observed_tiny_mishearing(self):
+    def test_wake_rescue_accepts_observed_fast_model_mishearing(self):
         self.assertTrue(_eligible_for_wake_probe("Oito em André-tapasso Brací.", 0.00905))
 
     def test_wake_rescue_rejects_low_energy_or_long_speech(self):
@@ -108,6 +115,18 @@ class AssistantToolTests(unittest.TestCase):
                 0.02,
             )
         )
+
+    def test_v47_model_defaults_and_choices(self):
+        self.assertEqual(WAKE_WHISPER_MODEL, "base")
+        self.assertEqual(WAKE_COMMAND_WHISPER_MODEL, "small")
+        self.assertEqual(WHISPER_WAKE_MODELS, ("tiny", "base", "small"))
+        self.assertIn("medium", WHISPER_COMMAND_MODELS)
+
+    def test_model_validation(self):
+        self.assertEqual(_validate_model("BASE", WHISPER_WAKE_MODELS, "base"), "base")
+        self.assertEqual(_validate_model(None, WHISPER_COMMAND_MODELS, "small"), "small")
+        with self.assertRaises(ValueError):
+            _validate_model("large-v3", WHISPER_WAKE_MODELS, "base")
 
 
 if __name__ == "__main__":
