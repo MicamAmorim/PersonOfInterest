@@ -33,6 +33,10 @@ def ensure_curator_schema() -> None:
         _ensure_column(conn, "face_samples", "active", "active INTEGER NOT NULL DEFAULT 1")
         _ensure_column(conn, "face_samples", "user_disabled", "user_disabled INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "body_samples", "user_disabled", "user_disabled INTEGER NOT NULL DEFAULT 0")
+        if "person_face_anchors" in tables:
+            _ensure_column(conn, "person_face_anchors", "source_event_id", "source_event_id INTEGER")
+        if "person_body_anchors" in tables:
+            _ensure_column(conn, "person_body_anchors", "source_event_id", "source_event_id INTEGER")
         conn.execute("UPDATE face_samples SET active = 1 WHERE active IS NULL")
         conn.execute("UPDATE face_samples SET user_disabled = 0 WHERE user_disabled IS NULL")
         conn.execute("UPDATE body_samples SET user_disabled = 0 WHERE user_disabled IS NULL")
@@ -194,16 +198,25 @@ def _install_manual_reactivation() -> None:
             return result
 
         def assign_cluster(self: Any, cluster_id: int, *, person_id: int | None = None, name: str | None = None) -> dict[str, Any]:
-            result = original_assign_cluster(self, cluster_id, person_id=person_id, name=name)
             ensure_curator_schema()
-            resolved = int(result["person_id"])
             with connection() as conn:
-                conn.execute(
-                    """UPDATE face_samples SET active = 1, user_disabled = 0
-                    WHERE person_id = ? AND cluster_id IS NULL""",
-                    (resolved,),
-                )
-                conn.commit()
+                affected_event_ids = [
+                    int(row["event_id"]) for row in conn.execute(
+                        "SELECT event_id FROM face_samples WHERE cluster_id = ?",
+                        (cluster_id,),
+                    ).fetchall()
+                ]
+            result = original_assign_cluster(self, cluster_id, person_id=person_id, name=name)
+            resolved = int(result["person_id"])
+            if affected_event_ids:
+                marks = ",".join("?" for _ in affected_event_ids)
+                with connection() as conn:
+                    conn.execute(
+                        f"""UPDATE face_samples SET active = 1, user_disabled = 0
+                        WHERE person_id = ? AND event_id IN ({marks})""",
+                        [resolved, *affected_event_ids],
+                    )
+                    conn.commit()
             return result
 
         identity_cls.assign_event = assign_event
