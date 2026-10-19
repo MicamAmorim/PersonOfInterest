@@ -69,9 +69,10 @@ def _repair_manual_events() -> int:
 def _repair_reviewed_false_positives() -> int:
     """Restore manual false-positive state if a stale reindex cleared it.
 
-    ``body_negative_samples`` is only created by explicit reviewed false
-    positives. Undo removes that row, so a remaining negative is durable evidence
-    that the event must still be excluded from identity/tracking history.
+    ``body_negative_samples`` is durable evidence of an explicit reviewed false
+    positive. Undoing a false positive deletes that negative row, so any row that
+    still exists here is authoritative even if a stale reindex also changed the
+    companion body_samples source.
     """
     with connection() as conn:
         tables = {
@@ -84,9 +85,7 @@ def _repair_reviewed_false_positives() -> int:
             """SELECT e.id
             FROM events e
             JOIN body_negative_samples bn ON bn.event_id = e.id
-            LEFT JOIN body_samples bs ON bs.event_id = e.id
-            WHERE COALESCE(bs.source, '') = 'false_positive'
-              AND COALESCE(e.identity_state, '') <> 'false_positive'"""
+            WHERE COALESCE(e.identity_state, '') <> 'false_positive'"""
         ).fetchall()
         for row in rows:
             conn.execute(
@@ -95,6 +94,12 @@ def _repair_reviewed_false_positives() -> int:
                     body_identity_source = NULL, unknown_cluster_id = NULL,
                     identity_state = 'false_positive', identity_confidence = NULL
                 WHERE id = ?""",
+                (int(row["id"]),),
+            )
+            conn.execute(
+                """UPDATE body_samples
+                SET person_id = NULL, verified = 0, source = 'false_positive'
+                WHERE event_id = ?""",
                 (int(row["id"]),),
             )
         if rows:
