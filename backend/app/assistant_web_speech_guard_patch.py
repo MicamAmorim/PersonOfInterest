@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 import time
 import urllib.error
@@ -21,12 +22,26 @@ def _preface_for(text: str) -> str | None:
     return web.WEB_SEARCH_PREFACE if intent == "web_search" else None
 
 
+def _clean_runtime_query(query: str) -> str:
+    value = web._cleanup_spoken_query(str(query or ""))
+    # Whisper commonly writes the colloquial "pra mim", while the original
+    # cleaner only knew the formal "para mim".
+    value = re.sub(
+        r"^\s*(?:pra|prá|para)\s+mim\b\s*[,;:\-]?\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(r"^\s*(?:por\s+favor)\b\s*[,;:\-]?\s*", "", value, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", value).strip(" .?!:;,-")
+
+
 def _pure_web_answer(camera_id: int, text: str, timezone_name: str | None = None) -> Any:
     intent, argument = tools.detect_intent(text, tools._person_names())
     if intent != "web_search":
         raise LookupError("not_web_search")
 
-    query = str(argument or "").strip()
+    query = _clean_runtime_query(str(argument or ""))
     if not query:
         return tools.CommandAnswer("Diga o que você quer que eu pesquise.", intent, "unknown")
     try:
