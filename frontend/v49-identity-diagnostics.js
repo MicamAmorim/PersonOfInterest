@@ -14,6 +14,13 @@
       link.dataset.poiV52 = '1';
       document.head.appendChild(link);
     }
+    if (!document.querySelector('link[data-poi-v53]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/v53-doorbell.css';
+      link.dataset.poiV53 = '1';
+      document.head.appendChild(link);
+    }
     if (!document.querySelector('script[data-poi-v50]')) {
       const script = document.createElement('script');
       script.src = '/v50-persistent.js';
@@ -33,6 +40,13 @@
       script.src = '/v52-library-viewer.js';
       script.defer = true;
       script.dataset.poiV52 = '1';
+      document.body.appendChild(script);
+    }
+    if (!document.querySelector('script[data-poi-v53]')) {
+      const script = document.createElement('script');
+      script.src = '/v53-doorbell.js';
+      script.defer = true;
+      script.dataset.poiV53 = '1';
       document.body.appendChild(script);
     }
   }
