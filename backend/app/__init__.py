@@ -13,6 +13,7 @@ from .identity_manual_guard_patch import install as _install_identity_manual_gua
 from .identity_safety_patch import install as _install_identity_safety_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
+from .tracking_v5_patch import install as _install_tracking_v5_patch
 from .spatial_vision_patch import install as _install_spatial_vision_patch
 
 _install_assistant_conversation_patch()
@@ -29,6 +30,9 @@ _install_identity_safety_patch()
 _install_identity_manual_guard_patch()
 _install_manual_learning_patch()
 _install_ptz_safety_patch()
+# V5 owns persistent track lifecycle, temporal body evidence, trusted galleries,
+# live scene access and manual-review provenance. Spatial rules observe it after.
+_install_tracking_v5_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -46,4 +50,5 @@ del _install_identity_manual_guard_patch
 del _install_identity_safety_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
+del _install_tracking_v5_patch
 del _install_spatial_vision_patch
