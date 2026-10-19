@@ -10,6 +10,7 @@ from .assistant_wake_patch import install as _install_assistant_wake_patch
 from .assistant_live_bridge_patch import install as _install_assistant_live_bridge_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .body_trust_sync_patch import install as _install_body_trust_sync_patch
+from .diagnostics_v5_patch import install as _install_diagnostics_v5_patch
 from .event_lifecycle_patch import install as _install_event_lifecycle_patch
 from .face_refinement_patch import install as _install_face_refinement_patch
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
@@ -51,8 +52,9 @@ _install_assistant_live_bridge_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
-# V3/V4 API router. It exports derived similarities, never raw embeddings/images.
+# V3/V4 API router. V5 then adds trust/temporal metadata without raw embeddings.
 _install_identity_diagnostics_patch()
+_install_diagnostics_v5_patch()
 
 del _install_assistant_conversation_patch
 del _install_assistant_v452_patch
@@ -62,6 +64,7 @@ del _install_assistant_wake_patch
 del _install_assistant_live_bridge_patch
 del _install_body_negative_backfill
 del _install_body_trust_sync_patch
+del _install_diagnostics_v5_patch
 del _install_event_lifecycle_patch
 del _install_face_refinement_patch
 del _install_identity_diagnostics_patch
