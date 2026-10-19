@@ -1,0 +1,181 @@
+.doorbell-overview-card {
+  margin: 14px 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid rgba(95, 212, 255, .18);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(95, 212, 255, .08), rgba(255,255,255,.02));
+}
+
+.doorbell-overview-copy { min-width: 0; }
+.doorbell-overview-copy h3 { margin: 2px 0 4px; }
+.doorbell-overview-copy p { margin: 0; }
+
+.doorbell-ring-button {
+  min-width: 170px;
+  min-height: 58px;
+  font-size: 16px;
+  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.doorbell-ring-button .doorbell-icon { font-size: 22px; }
+
+.doorbell-settings-panel { margin-bottom: 18px; }
+.doorbell-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.doorbell-card {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  padding: 15px;
+  background: rgba(255,255,255,.025);
+}
+
+.doorbell-card h3 { margin: 2px 0 5px; }
+.doorbell-card > p { margin: 0 0 12px; }
+.doorbell-form { display: grid; gap: 11px; }
+.doorbell-form label { display: grid; gap: 6px; }
+.doorbell-form input[type="text"] { width: 100%; }
+
+.doorbell-check-row,
+.doorbell-radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.doorbell-check,
+.doorbell-radio {
+  display: inline-flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px !important;
+  cursor: pointer;
+}
+
+.doorbell-check input,
+.doorbell-radio input { margin: 0; }
+
+.doorbell-preview {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(95, 212, 255, .07);
+  border: 1px solid rgba(95, 212, 255, .14);
+  font-size: 13px;
+}
+
+.doorbell-camera-list,
+.doorbell-spatial-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.doorbell-camera-item,
+.doorbell-spatial-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(0,0,0,.12);
+}
+
+.doorbell-camera-main,
+.doorbell-spatial-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.doorbell-camera-meta,
+.doorbell-spatial-meta {
+  color: var(--muted, #8995a5);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.doorbell-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #687384;
+  flex: 0 0 auto;
+}
+.doorbell-status-dot.online { background: #67e6a2; }
+.doorbell-status-dot.unavailable { background: #ff8b82; }
+
+.doorbell-section-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+.doorbell-section-title h3 { margin: 0; }
+.doorbell-section-title p { margin: 3px 0 0; }
+
+.doorbell-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+.doorbell-switch input { opacity: 0; width: 0; height: 0; }
+.doorbell-switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #333c48;
+  cursor: pointer;
+  transition: .15s ease;
+}
+.doorbell-switch span::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  top: 3px;
+  left: 3px;
+  border-radius: 50%;
+  background: #d9e3ed;
+  transition: .15s ease;
+}
+.doorbell-switch input:checked + span { background: #2f91b8; }
+.doorbell-switch input:checked + span::after { transform: translateX(18px); }
+.doorbell-switch input:disabled + span { opacity: .42; cursor: not-allowed; }
+
+.doorbell-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+@media (max-width: 780px) {
+  .doorbell-overview-card { align-items: stretch; flex-direction: column; }
+  .doorbell-ring-button { width: 100%; }
+  .doorbell-settings-grid { grid-template-columns: 1fr; }
+}
