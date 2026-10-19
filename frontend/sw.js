@@ -1,5 +1,12 @@
-const CACHE = 'personofinterest-v4.8.1';
-const SHELL = ['/', '/styles.css', '/v2.css', '/v34.css', '/v48-spatial.css', '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/v4-audio-fix.js', '/v42-assistant.js', '/v48-spatial-alerts.js', '/v49-identity-diagnostics.js', '/camera-webrtc.html', '/tonho-lab.html', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'personofinterest-v5.3-doorbell';
+const SHELL = [
+  '/', '/styles.css', '/v2.css', '/v34.css', '/v48-spatial.css',
+  '/v50-persistent.css', '/v52-library-viewer.css', '/v53-doorbell.css',
+  '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/v4-audio-fix.js',
+  '/v42-assistant.js', '/v48-spatial-alerts.js', '/v49-identity-diagnostics.js',
+  '/v50-persistent.js', '/v51-live-overlay.js', '/v52-library-viewer.js', '/v53-doorbell.js',
+  '/camera-webrtc.html', '/tonho-lab.html', '/manifest.webmanifest', '/icon.svg'
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
