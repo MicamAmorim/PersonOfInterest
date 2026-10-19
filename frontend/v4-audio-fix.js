@@ -28,12 +28,30 @@
     });
   }
 
+  function viewerFrame() {
+    return document.getElementById('viewerFrame');
+  }
+
+  function setViewerMicrophonePermission(enabled) {
+    const frame = viewerFrame();
+    if (!frame) return;
+    const features = ['autoplay', 'fullscreen'];
+    if (enabled) features.push('microphone');
+    frame.setAttribute('allow', features.join('; '));
+  }
+
+  function postViewer(type) {
+    const frame = viewerFrame();
+    if (!frame) return;
+    try {
+      frame.contentWindow?.postMessage({ source: 'personofinterest-parent', type }, location.origin);
+    } catch (_) {}
+  }
+
   function hardMuteCurrentViewer() {
-    const frame = document.getElementById('viewerFrame');
+    const frame = viewerFrame();
     if (!frame) return;
 
-    // Same-origin synchronous mute first: this closes the acoustic loop before
-    // the old iframe has time to unload and before the new page asks for mic.
     try {
       const doc = frame.contentDocument;
       muteDeep(doc);
@@ -47,10 +65,14 @@
       if (nested?.contentDocument) muteDeep(nested.contentDocument);
     } catch (_) {}
 
-    // Message fallback lets camera-webrtc disable receiver tracks as well.
-    try {
-      frame.contentWindow?.postMessage({ source: 'personofinterest-parent', type: 'hard-mute-audio' }, location.origin);
-    } catch (_) {}
+    postViewer('hard-mute-audio');
+  }
+
+  function stopOutgoingTalkback() {
+    // This explicitly stops getUserMedia tracks + RTCPeerConnection + WebSocket
+    // before the iframe is replaced. Relying only on unload leaves a short race
+    // where microphone audio can still reach the camera.
+    postViewer('stop-talkback');
   }
 
   function renderHalfDuplexAudioState() {
@@ -90,15 +112,16 @@
     event?.preventDefault?.();
     event?.stopImmediatePropagation?.();
 
-    // Cut every currently playing camera-audio path synchronously, before
-    // changing iframe URL / opening getUserMedia. This is the key anti-feedback
-    // guarantee for push-to-talk.
     hardMuteCurrentViewer();
+    stopOutgoingTalkback();
 
     talking = true;
     resumeSpeaker = Boolean(state.viewer.speakerOn);
     state.viewer.speakerOn = false;
     state.viewer.micOn = true;
+
+    // Permission Policy is delegated only for the lifetime of an explicit PTT.
+    setViewerMicrophonePermission(true);
 
     if (event?.pointerId != null) {
       activePointerId = event.pointerId;
@@ -110,17 +133,22 @@
   }
 
   function stopTalk(event) {
-    if (!talking) return;
+    if (!talking) {
+      setViewerMicrophonePermission(false);
+      return;
+    }
     event?.preventDefault?.();
     event?.stopImmediatePropagation?.();
 
-    // Stop outgoing talkback first. Listening is restored only by loading the
-    // non-microphone viewer after micOn has been cleared.
+    // Stop outgoing audio before changing any state or restoring listening.
+    stopOutgoingTalkback();
     hardMuteCurrentViewer();
+
     talking = false;
     state.viewer.micOn = false;
     state.viewer.speakerOn = resumeSpeaker;
     resumeSpeaker = false;
+    setViewerMicrophonePermission(false);
 
     if (activePointerId != null) {
       try { talk.releasePointerCapture(activePointerId); } catch (_) {}
@@ -131,8 +159,6 @@
     renderHalfDuplexAudioState();
   }
 
-  // The legacy runtime uses click-to-toggle. Capture the click before that
-  // handler and replace it with real push-to-talk semantics.
   talk.addEventListener('click', event => {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -158,6 +184,9 @@
     if (document.hidden) stopTalk();
   });
 
+  // Defense in depth: the viewer starts without microphone delegation even
+  // though older index.html versions may still contain allow="microphone".
+  setViewerMicrophonePermission(false);
   renderHalfDuplexAudioState();
 })();
 
