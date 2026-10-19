@@ -10,6 +10,7 @@ from .assistant_wake_patch import install as _install_assistant_wake_patch
 from .assistant_live_bridge_patch import install as _install_assistant_live_bridge_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .body_trust_sync_patch import install as _install_body_trust_sync_patch
+from .event_lifecycle_patch import install as _install_event_lifecycle_patch
 from .face_refinement_patch import install as _install_face_refinement_patch
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
 from .identity_manual_guard_patch import install as _install_identity_manual_guard_patch
@@ -39,6 +40,8 @@ _install_tracking_v5_patch()
 # BodyIdentity's legacy label synchronizer would otherwise collapse
 # face_verified_trusted back to face_verified after each poll/restart.
 _install_body_trust_sync_patch()
+# Legacy Body/Push workers must not race the collecting phase of an active track.
+_install_event_lifecycle_patch()
 # If an initially-unknown track yields a substantially better face later, refine
 # the same event to a known identity without duplicating unknown-cluster samples.
 _install_face_refinement_patch()
@@ -59,6 +62,7 @@ del _install_assistant_wake_patch
 del _install_assistant_live_bridge_patch
 del _install_body_negative_backfill
 del _install_body_trust_sync_patch
+del _install_event_lifecycle_patch
 del _install_face_refinement_patch
 del _install_identity_diagnostics_patch
 del _install_identity_manual_guard_patch
