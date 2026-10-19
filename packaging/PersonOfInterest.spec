@@ -32,8 +32,10 @@ for package in (
     "ctranslate2",
     "edge_tts",
     "faster_whisper",
+    "huggingface_hub",
     "onnxruntime",
     "pywebpush",
+    "tokenizers",
     "tzdata",
     "websockets",
 ):
