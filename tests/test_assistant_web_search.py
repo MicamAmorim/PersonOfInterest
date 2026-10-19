@@ -9,6 +9,7 @@ from app import assistant_tools as tools
 from app.assistant_web_search_patch import (
     WebResult,
     _DuckParser,
+    _alternative_queries,
     _extract_web_query,
     _parse_searxng_payload,
     _summarize,
@@ -20,6 +21,10 @@ class AssistantWebSearchTests(unittest.TestCase):
         self.assertEqual(
             _extract_web_query("Pesquise na internet: qual é a altura da Torre Eiffel?"),
             "qual é a altura da Torre Eiffel",
+        )
+        self.assertEqual(
+            _extract_web_query("pesquisa na internet para mim qual a altura da Torrie Eiffel"),
+            "qual a altura da Torrie Eiffel",
         )
         self.assertEqual(
             _extract_web_query("pesquisa no google altura torre eiffel"),
@@ -39,10 +44,11 @@ class AssistantWebSearchTests(unittest.TestCase):
     def test_searxng_json_is_converted_to_results(self):
         results = _parse_searxng_payload(
             {
+                "answers": ["A Torre Eiffel tem 330 metros de altura."],
                 "results": [
                     {
                         "title": "Torre Eiffel",
-                        "content": "A Torre Eiffel tem aproximadamente 330 metros de altura.",
+                        "content": "Monumento localizado em Paris.",
                         "url": "https://www.toureiffel.paris/",
                     },
                     {
@@ -50,12 +56,22 @@ class AssistantWebSearchTests(unittest.TestCase):
                         "content": "A estrutura fica em Paris, na França.",
                         "url": "https://en.wikipedia.org/wiki/Eiffel_Tower",
                     },
-                ]
+                ],
             }
         )
-        self.assertEqual(len(results), 2)
+        self.assertGreaterEqual(len(results), 3)
         self.assertIn("330 metros", results[0].snippet)
-        self.assertEqual(results[0].url, "https://www.toureiffel.paris/")
+        self.assertEqual(results[1].url, "https://www.toureiffel.paris/")
+
+    def test_searxng_corrections_can_recover_whisper_names(self):
+        alternatives = _alternative_queries(
+            {
+                "corrections": [{"correction": "qual a altura da Torre Eiffel"}],
+                "suggestions": ["altura torre eiffel"],
+            }
+        )
+        self.assertEqual(alternatives[0], "qual a altura da Torre Eiffel")
+        self.assertIn("altura torre eiffel", alternatives)
 
     def test_summary_uses_search_snippets_and_sources(self):
         text = _summarize(
