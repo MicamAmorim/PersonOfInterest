@@ -15,6 +15,15 @@ from .tracking_v5_patch import (
 def _sync_verified_labels_v5(self: Any) -> None:
     """Synchronize event labels without erasing temporal/manual trust provenance."""
     ensure_schema()
+    # Preserve the self-healing behavior installed by identity_manual_guard_patch.
+    # Its old wrapper is replaced by this V5 synchronizer, so invoke the repair
+    # explicitly before reconciling body provenance.
+    try:
+        from .identity_manual_guard_patch import _repair_authoritative_state
+        _repair_authoritative_state()
+    except Exception:
+        pass
+
     with connection() as conn:
         rows = conn.execute(
             """SELECT bs.event_id, bs.person_id sample_person, bs.source, bs.trusted,
@@ -33,7 +42,7 @@ def _sync_verified_labels_v5(self: Any) -> None:
                 continue
             source = str(row["source"] or "")
             # Existing databases predate identity_origin. Their durable provenance
-            # is the body sample source, so keep manual_verified variants trusted.
+            # is the body sample source, so keep every *manual* variant trusted.
             manual = str(row["identity_origin"] or "") == "manual" or "manual" in source
             face_verified = bool(row["face_verified"])
             support = int(row["temporal_support"] or 1)
