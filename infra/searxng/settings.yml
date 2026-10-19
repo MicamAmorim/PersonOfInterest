@@ -12,6 +12,7 @@ search:
     - json
 
 server:
+  secret_key: "personofinterest-local-search"
   limiter: false
   public_instance: false
   image_proxy: false
