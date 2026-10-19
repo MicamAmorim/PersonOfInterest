@@ -14,6 +14,13 @@
       script.dataset.poiV50 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v51]')) {
+      const script = document.createElement('script');
+      script.src = '/v51-live-overlay.js';
+      script.defer = true;
+      script.dataset.poiV51 = '1';
+      document.body.appendChild(script);
+    }
   }
 
   function install() {
