@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 APP_NAME = "PersonOfInterest"
-APP_VERSION = "0.4.8"
+APP_VERSION = "0.5.0"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data"))).resolve()
 DB_PATH = DATA_DIR / "person_of_interest.db"
