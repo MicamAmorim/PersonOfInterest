@@ -1,4 +1,21 @@
 (() => {
+  function loadV5Assets() {
+    if (!document.querySelector('link[data-poi-v50]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/v50-persistent.css';
+      link.dataset.poiV50 = '1';
+      document.head.appendChild(link);
+    }
+    if (!document.querySelector('script[data-poi-v50]')) {
+      const script = document.createElement('script');
+      script.src = '/v50-persistent.js';
+      script.defer = true;
+      script.dataset.poiV50 = '1';
+      document.body.appendChild(script);
+    }
+  }
+
   function install() {
     const actions = document.querySelector('#identityView .identity-actions');
     if (!actions || document.getElementById('identityExportDiagnostics')) return false;
@@ -21,9 +38,11 @@
       window.location.href = `/api/identity/diagnostics/export?${params.toString()}`;
     });
     actions.prepend(button);
+    loadV5Assets();
     return true;
   }
 
+  loadV5Assets();
   if (!install()) {
     let attempts = 0;
     const timer = setInterval(() => {
