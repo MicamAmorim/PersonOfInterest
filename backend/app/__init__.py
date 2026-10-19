@@ -7,6 +7,7 @@ from .assistant_v452_patch import install as _install_assistant_v452_patch
 from .assistant_model_settings_patch import install as _install_assistant_model_settings_patch
 from .assistant_command_stt_patch import install as _install_assistant_command_stt_patch
 from .assistant_wake_patch import install as _install_assistant_wake_patch
+from .assistant_live_bridge_patch import install as _install_assistant_live_bridge_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
 from .identity_manual_guard_patch import install as _install_identity_manual_guard_patch
@@ -33,6 +34,9 @@ _install_ptz_safety_patch()
 # V5 owns persistent track lifecycle, temporal body evidence, trusted galleries,
 # live scene access and manual-review provenance. Spatial rules observe it after.
 _install_tracking_v5_patch()
+# The conversation patch captured answer_command before V5 replaced it; refresh
+# that reference so Tonho's spoken commands use the live tracker state.
+_install_assistant_live_bridge_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -44,6 +48,7 @@ del _install_assistant_v452_patch
 del _install_assistant_model_settings_patch
 del _install_assistant_command_stt_patch
 del _install_assistant_wake_patch
+del _install_assistant_live_bridge_patch
 del _install_body_negative_backfill
 del _install_identity_diagnostics_patch
 del _install_identity_manual_guard_patch
