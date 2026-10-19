@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -10,10 +9,9 @@ from pydantic import BaseModel, Field
 
 from . import body_identity as bi
 from . import identity as fi
-from .config import DATA_DIR, EVENTS_DIR, FACES_DIR
+from .config import FACES_DIR
 from .db import connection, utc_now
 from .reference_curator_patch import ensure_curator_schema
-from .tracking_v5_patch import BODY_ANCHORS_DIR
 
 
 router = APIRouter(tags=["v5-reference-curation"])
@@ -60,45 +58,6 @@ def _copy_face_crop(relative: str | None, target_person_id: int) -> str | None:
     return str(target.relative_to(FACES_DIR)).replace("\\", "/")
 
 
-def _body_crop_from_event(event_id: int, target_person_id: int) -> str | None:
-    if fi.cv2 is None:
-        return None
-    with connection() as conn:
-        row = conn.execute(
-            "SELECT snapshot_path, bbox_json FROM events WHERE id = ?",
-            (event_id,),
-        ).fetchone()
-    if row is None:
-        return None
-    path = _safe_under(EVENTS_DIR, row["snapshot_path"])
-    if path is None:
-        return None
-    frame = fi.cv2.imread(str(path))
-    if frame is None:
-        return None
-    try:
-        bbox = json.loads(row["bbox_json"] or "{}")
-        x = int(float(bbox.get("x", 0)))
-        y = int(float(bbox.get("y", 0)))
-        w = int(float(bbox.get("w", 0)))
-        h = int(float(bbox.get("h", 0)))
-    except Exception:
-        return None
-    height, width = frame.shape[:2]
-    x1, y1 = max(0, x), max(0, y)
-    x2, y2 = min(width, x + w), min(height, y + h)
-    if x2 - x1 < 18 or y2 - y1 < 36:
-        return None
-    crop = frame[y1:y2, x1:x2]
-    folder = BODY_ANCHORS_DIR / str(target_person_id)
-    folder.mkdir(parents=True, exist_ok=True)
-    stamp = utc_now().replace(":", "").replace("+", "_").replace(".", "_")
-    target = folder / f"reassigned_{stamp}.jpg"
-    if not fi.cv2.imwrite(str(target), crop, [int(fi.cv2.IMWRITE_JPEG_QUALITY), 92]):
-        return None
-    return str(target.relative_to(DATA_DIR)).replace("\\", "/")
-
-
 def _state_name(*, active: bool, trusted: bool, kind: str) -> str:
     if not active:
         return "disabled"
@@ -142,7 +101,7 @@ def curated_references(person_id: int) -> dict[str, Any]:
     person = _person(person_id)
     with connection() as conn:
         face_anchors = conn.execute(
-            """SELECT id, quality, source, active, created_at
+            """SELECT id, quality, source, active, crop_path, source_event_id, created_at
             FROM person_face_anchors WHERE person_id = ? ORDER BY active DESC, created_at DESC""",
             (person_id,),
         ).fetchall()
@@ -154,7 +113,7 @@ def curated_references(person_id: int) -> dict[str, Any]:
             (person_id,),
         ).fetchall()
         body_anchors = conn.execute(
-            """SELECT id, quality, source, active, created_at
+            """SELECT id, quality, source, active, crop_path, source_event_id, created_at
             FROM person_body_anchors WHERE person_id = ? ORDER BY active DESC, created_at DESC""",
             (person_id,),
         ).fetchall()
@@ -170,6 +129,11 @@ def curated_references(person_id: int) -> dict[str, Any]:
     for row in face_anchors:
         item = dict(row)
         active = bool(item["active"])
+        image_url = (
+            f"/api/v5/face-anchors/{item['id']}/image"
+            if item.get("crop_path")
+            else (f"/api/events/{item['source_event_id']}/snapshot" if item.get("source_event_id") else None)
+        )
         references.append({
             **item,
             "type": "face",
@@ -177,7 +141,8 @@ def curated_references(person_id: int) -> dict[str, Any]:
             "active": active,
             "state": _state_name(active=active, trusted=True, kind="face"),
             "ref_kind": "face-anchor",
-            "image_url": f"/api/v5/face-anchors/{item['id']}/image",
+            "event_id": item.get("source_event_id"),
+            "image_url": image_url,
         })
     for row in face_events:
         item = dict(row)
@@ -194,6 +159,11 @@ def curated_references(person_id: int) -> dict[str, Any]:
     for row in body_anchors:
         item = dict(row)
         active = bool(item["active"])
+        image_url = (
+            f"/api/v5/body-anchors/{item['id']}/image"
+            if item.get("crop_path")
+            else (f"/api/events/{item['source_event_id']}/snapshot" if item.get("source_event_id") else None)
+        )
         references.append({
             **item,
             "type": "body",
@@ -201,7 +171,8 @@ def curated_references(person_id: int) -> dict[str, Any]:
             "active": active,
             "state": _state_name(active=active, trusted=True, kind="body"),
             "ref_kind": "body-anchor",
-            "image_url": f"/api/v5/body-anchors/{item['id']}/image",
+            "event_id": item.get("source_event_id"),
+            "image_url": image_url,
         })
     for row in body_events:
         item = dict(row)
@@ -236,7 +207,10 @@ def update_reference_state(
     ensure_curator_schema()
     if payload.active is None and payload.trusted is None:
         raise HTTPException(status_code=400, detail="Informe active ou trusted")
+    if payload.trusted is not None and ref_kind != "body-event":
+        raise HTTPException(status_code=400, detail="A confiança manual só se aplica a bodies originados de eventos")
 
+    row = None
     with connection() as conn:
         if ref_kind == "face-anchor":
             row = conn.execute(
@@ -362,11 +336,12 @@ def move_reference(
             copied = _copy_face_crop(row["crop_path"], payload.target_person_id)
             with connection() as conn:
                 cursor = conn.execute(
-                    """INSERT INTO person_face_anchors(person_id, embedding, crop_path, quality, source, active, created_at)
-                    VALUES (?, ?, ?, ?, 'manual_reassigned', 1, ?)""",
+                    """INSERT INTO person_face_anchors(
+                        person_id, embedding, crop_path, quality, source, active, created_at, source_event_id
+                    ) VALUES (?, ?, ?, ?, 'manual_reassigned', 1, ?, ?)""",
                     (
                         payload.target_person_id, row["embedding"], copied,
-                        float(row["quality"] or 0.0), utc_now(),
+                        float(row["quality"] or 0.0), utc_now(), event_id,
                     ),
                 )
                 conn.execute(
@@ -399,14 +374,14 @@ def move_reference(
                 )
                 conn.commit()
         else:
-            copied = _body_crop_from_event(event_id, payload.target_person_id)
             with connection() as conn:
                 cursor = conn.execute(
-                    """INSERT INTO person_body_anchors(person_id, embedding, crop_path, quality, source, active, created_at)
-                    VALUES (?, ?, ?, ?, 'manual_reassigned', 1, ?)""",
+                    """INSERT INTO person_body_anchors(
+                        person_id, embedding, crop_path, quality, source, active, created_at, source_event_id
+                    ) VALUES (?, ?, NULL, ?, 'manual_reassigned', 1, ?, ?)""",
                     (
-                        payload.target_person_id, row["embedding"], copied,
-                        float(row["quality"] or 0.0), utc_now(),
+                        payload.target_person_id, row["embedding"],
+                        float(row["quality"] or 0.0), utc_now(), event_id,
                     ),
                 )
                 conn.execute(
