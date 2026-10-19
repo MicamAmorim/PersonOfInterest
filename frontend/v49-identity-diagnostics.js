@@ -7,6 +7,13 @@
       link.dataset.poiV50 = '1';
       document.head.appendChild(link);
     }
+    if (!document.querySelector('link[data-poi-v52]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/v52-library-viewer.css';
+      link.dataset.poiV52 = '1';
+      document.head.appendChild(link);
+    }
     if (!document.querySelector('script[data-poi-v50]')) {
       const script = document.createElement('script');
       script.src = '/v50-persistent.js';
@@ -19,6 +26,13 @@
       script.src = '/v51-live-overlay.js';
       script.defer = true;
       script.dataset.poiV51 = '1';
+      document.body.appendChild(script);
+    }
+    if (!document.querySelector('script[data-poi-v52]')) {
+      const script = document.createElement('script');
+      script.src = '/v52-library-viewer.js';
+      script.defer = true;
+      script.dataset.poiV52 = '1';
       document.body.appendChild(script);
     }
   }
