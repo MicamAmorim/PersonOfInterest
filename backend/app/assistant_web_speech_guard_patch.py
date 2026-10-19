@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import socket
+import time
 import urllib.error
 from typing import Any
 
 from . import assistant_tools as tools
 from . import assistant_web_search_patch as web
 from .assistant import manager as assistant_manager
+
+
+WEB_PREFACE_MIN_GAP_SECONDS = 2.25
 
 
 def _preface_for(text: str) -> str | None:
@@ -38,10 +42,18 @@ def _pure_web_answer(camera_id: int, text: str, timezone_name: str | None = None
         return tools.CommandAnswer("Não consegui concluir essa pesquisa na internet.", intent, "web:error")
 
 
-def _speak_preface(camera_id: int, text: str) -> None:
+def _ensure_preface_state() -> dict[int, float]:
+    from . import wake_word as ww
+
+    if not hasattr(ww.manager, "_poi_web_preface_at"):
+        ww.manager._poi_web_preface_at = {}
+    return ww.manager._poi_web_preface_at
+
+
+def _speak_preface(camera_id: int, text: str) -> bool:
     preface = _preface_for(text)
     if not preface:
-        return
+        return False
     try:
         settings = assistant_manager.settings_for(camera_id)
         assistant_manager.speak(
@@ -49,9 +61,20 @@ def _speak_preface(camera_id: int, text: str) -> None:
             preface,
             voice_gender=str(settings.get("voice_gender") or "female"),
         )
+        _ensure_preface_state()[camera_id] = time.monotonic()
+        return True
     except Exception:
         # A falha do preâmbulo não deve impedir a pesquisa nem a resposta final.
+        return False
+
+
+def _wait_for_preface_gap(camera_id: int) -> None:
+    started = _ensure_preface_state().get(camera_id)
+    if started is None:
         return
+    remaining = WEB_PREFACE_MIN_GAP_SECONDS - (time.monotonic() - float(started))
+    if remaining > 0:
+        time.sleep(remaining)
 
 
 def install() -> None:
@@ -80,4 +103,46 @@ def install() -> None:
         return pure_answer(camera_id, text, timezone_name)
 
     conversation.answer_command = live_answer
+
+    # V4.5.2 imported answer_command by value before the web-search patch was
+    # installed. The dual-STT live camera path ultimately calls this module, so
+    # refresh that captured reference too. Without this line Tonho Lab can search
+    # while the real camera still routes the same phrase to the old command set.
+    from . import assistant_v452_patch as v452
+
+    v452.answer_command = live_answer
+
+    # Keep two talkback files from colliding when the web result returns very
+    # quickly. go2rtc acknowledges playback before the camera necessarily
+    # finishes speaking the preface.
+    original_speak_answer = conversation._speak_answer
+
+    def speak_answer_with_web_gap(
+        manager: Any,
+        camera: dict[str, Any],
+        transcript: str,
+        response: str,
+        certainty: str | None,
+        person_id: int | None,
+        *,
+        intent: str,
+        follow_up: bool,
+        open_conversation: bool,
+    ) -> None:
+        camera_id = int(camera["id"])
+        if intent == "web_search":
+            _wait_for_preface_gap(camera_id)
+        original_speak_answer(
+            manager,
+            camera,
+            transcript,
+            response,
+            certainty,
+            person_id,
+            intent=intent,
+            follow_up=follow_up,
+            open_conversation=open_conversation,
+        )
+
+    conversation._speak_answer = speak_answer_with_web_gap
     tools._poi_web_speech_guard_installed = True
