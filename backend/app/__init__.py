@@ -23,6 +23,7 @@ from .manual_integrity_v5_patch import install as _install_manual_integrity_v5_p
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
 from .reference_curator_patch import install as _install_reference_curator_patch
+from .snapshot_display_patch import install as _install_snapshot_display_patch
 from .tracking_v5_patch import install as _install_tracking_v5_patch
 from .spatial_vision_patch import install as _install_spatial_vision_patch
 
@@ -43,6 +44,10 @@ _install_ptz_safety_patch()
 # V5 owns persistent track lifecycle, temporal body evidence, trusted galleries,
 # live scene access and manual-review provenance. Spatial rules observe it after.
 _install_tracking_v5_patch()
+# Timeline/UI snapshots keep the familiar BB overlay while Face/Body ReID read
+# the separate clean best/trigger frames. The display BB stays synchronized with
+# the same frame selected as the best event snapshot.
+_install_snapshot_display_patch()
 # Upgrade the old manual guard to recognize every manual provenance variant and
 # the new identity_origin column before any reindex/worker synchronization.
 _install_manual_integrity_v5_patch()
@@ -98,5 +103,6 @@ del _install_manual_integrity_v5_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
 del _install_reference_curator_patch
+del _install_snapshot_display_patch
 del _install_tracking_v5_patch
 del _install_spatial_vision_patch
