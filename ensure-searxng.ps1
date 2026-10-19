@@ -6,8 +6,8 @@ $Url = "http://127.0.0.1:8888"
 
 function Test-Searxng {
     try {
-        $config = Invoke-RestMethod -Uri "$Url/config" -Method Get -TimeoutSec 2
-        return $null -ne $config
+        $probe = Invoke-RestMethod -Uri "$Url/search?q=teste&format=json&language=pt-BR&categories=general" -Method Get -TimeoutSec 4
+        return ($null -ne $probe -and $null -ne $probe.results)
     } catch {
         return $false
     }
@@ -52,7 +52,7 @@ try {
 }
 
 if ($composeOk) {
-    for ($i = 0; $i -lt 50; $i++) {
+    for ($i = 0; $i -lt 75; $i++) {
         if (Test-Searxng) {
             Write-Host "SearXNG local pronto em $Url" -ForegroundColor DarkGreen
             Write-Output $Url
@@ -62,5 +62,5 @@ if ($composeOk) {
     }
 }
 
-Write-Host "SearXNG local nao respondeu; Tonho usara o fallback gratuito nesta execucao." -ForegroundColor DarkYellow
+Write-Host "SearXNG local nao passou no teste de pesquisa; Tonho usara o fallback gratuito nesta execucao." -ForegroundColor DarkYellow
 Write-Output ""
