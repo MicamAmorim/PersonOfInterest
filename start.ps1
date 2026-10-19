@@ -17,6 +17,7 @@ $VisionModel = Join-Path $ModelsDir "yolox_tiny.onnx"
 $FaceDetectorModel = Join-Path $ModelsDir "face_detection_yunet_2023mar.onnx"
 $FaceRecognizerModel = Join-Path $ModelsDir "face_recognition_sface_2021dec.onnx"
 $BodyReidModel = Join-Path $ModelsDir "osnet_x0_25_msmt17.onnx"
+$SearxngBootstrap = Join-Path $Root "ensure-searxng.ps1"
 
 $VisionModelUrl = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx"
 $FaceDetectorModelUrl = "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
@@ -27,7 +28,7 @@ if (-not (Test-Path $PythonExe) -or -not (Test-Path $Go2rtcExe)) {
     throw "Instalacao incompleta. Execute .\setup.ps1 primeiro."
 }
 
-Write-Host "Verificando dependencias da V4.8..." -ForegroundColor DarkGray
+Write-Host "Verificando dependencias da V5..." -ForegroundColor DarkGray
 $oldErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
@@ -41,13 +42,13 @@ if ($depsExitCode -ne 0) {
     Write-Host "Ajustando dependencias de visao, identidade, assistente, voz local, fusos horarios e Web Push..." -ForegroundColor Yellow
     & $PythonExe -m pip install --upgrade -r $Requirements
     if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao instalar as dependencias da V4.8."
+        throw "Falha ao instalar as dependencias da V5."
     }
 }
 
 & $PythonExe -c "import cv2,numpy,onnxruntime,pywebpush,cryptography,edge_tts,faster_whisper,av; from zoneinfo import ZoneInfo; ZoneInfo('America/Sao_Paulo'); assert int(cv2.__version__.split('.')[0]) < 5; assert hasattr(cv2,'FaceDetectorYN_create'); assert hasattr(cv2,'FaceRecognizerSF_create'); print('OpenCV',cv2.__version__,'| NumPy',numpy.__version__,'| ONNX Runtime',onnxruntime.__version__,'| Edge TTS OK | faster-whisper OK | Timezone DB OK | Web Push OK')"
 if ($LASTEXITCODE -ne 0) {
-    throw "Dependencias da V4.8 nao estao compativeis."
+    throw "Dependencias da V5 nao estao compativeis."
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
@@ -84,6 +85,20 @@ $env:FACE_DETECTOR_MODEL_PATH = $FaceDetectorModel
 $env:FACE_RECOGNIZER_MODEL_PATH = $FaceRecognizerModel
 $env:BODY_REID_MODEL_PATH = $BodyReidModel
 
+if (Test-Path $SearxngBootstrap) {
+    try {
+        [string]$SearxngUrl = & $SearxngBootstrap
+        if (-not [string]::IsNullOrWhiteSpace($SearxngUrl)) {
+            $env:SEARXNG_URL = $SearxngUrl.Trim()
+        } else {
+            Remove-Item Env:SEARXNG_URL -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Remove-Item Env:SEARXNG_URL -ErrorAction SilentlyContinue
+        Write-Host "SearXNG local indisponivel; Tonho usara o fallback gratuito." -ForegroundColor DarkYellow
+    }
+}
+
 $runtimeYaml = @'
 api:
   listen: ":1984"
@@ -97,7 +112,7 @@ log:
 '@
 [System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
 
-Write-Host "=== PersonOfInterest V4.8 ===" -ForegroundColor Cyan
+Write-Host "=== PersonOfInterest V5 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
@@ -142,8 +157,13 @@ try {
         throw "O backend nao respondeu na porta 8080."
     }
 
-    Write-Host "PersonOfInterest V4.8 online: http://localhost:8080" -ForegroundColor Green
+    Write-Host "PersonOfInterest V5 online: http://localhost:8080" -ForegroundColor Green
     Write-Host "Tonho Lab: http://localhost:8080/tonho-lab.html" -ForegroundColor DarkCyan
+    if ($env:SEARXNG_URL) {
+        Write-Host "Pesquisa do Tonho: SearXNG local ($env:SEARXNG_URL)" -ForegroundColor DarkCyan
+    } else {
+        Write-Host "Pesquisa do Tonho: fallback gratuito ativo." -ForegroundColor DarkYellow
+    }
     Write-Host "Whisper: modelos escolhidos no Assistente sao baixados automaticamente se necessario." -ForegroundColor DarkGray
     Write-Host "Cercas virtuais usam o centro inferior da bounding box (pe da pessoa)." -ForegroundColor DarkGray
     Write-Host "Para acesso seguro no celular: .\tailscale-serve.ps1" -ForegroundColor DarkGray
