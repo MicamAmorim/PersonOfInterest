@@ -11,6 +11,7 @@ from .assistant_live_bridge_patch import install as _install_assistant_live_brid
 from .assistant_web_search_patch import install as _install_assistant_web_search_patch
 from .assistant_web_fallback_patch import install as _install_assistant_web_fallback_patch
 from .assistant_web_speech_guard_patch import install as _install_assistant_web_speech_guard_patch
+from .assistant_talkback_guard_patch import install as _install_assistant_talkback_guard_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .body_trust_sync_patch import install as _install_body_trust_sync_patch
 from .diagnostics_v5_patch import install as _install_diagnostics_v5_patch
@@ -75,6 +76,9 @@ _install_assistant_web_fallback_patch()
 # emit the web-search preface; Tonho Lab/API calls stay silent unless they
 # explicitly request playback.
 _install_assistant_web_speech_guard_patch()
+# iCSee/XMEye OPTalk is single-session. Keep each TTS talkback stream ephemeral
+# and hold the speech lock until playback has really finished.
+_install_assistant_talkback_guard_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -91,6 +95,7 @@ del _install_assistant_live_bridge_patch
 del _install_assistant_web_search_patch
 del _install_assistant_web_fallback_patch
 del _install_assistant_web_speech_guard_patch
+del _install_assistant_talkback_guard_patch
 del _install_body_negative_backfill
 del _install_body_trust_sync_patch
 del _install_diagnostics_v5_patch
