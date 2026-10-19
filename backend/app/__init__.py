@@ -9,6 +9,7 @@ from .assistant_command_stt_patch import install as _install_assistant_command_s
 from .assistant_wake_patch import install as _install_assistant_wake_patch
 from .assistant_live_bridge_patch import install as _install_assistant_live_bridge_patch
 from .assistant_web_search_patch import install as _install_assistant_web_search_patch
+from .assistant_web_speech_guard_patch import install as _install_assistant_web_speech_guard_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .body_trust_sync_patch import install as _install_body_trust_sync_patch
 from .diagnostics_v5_patch import install as _install_diagnostics_v5_patch
@@ -59,9 +60,12 @@ _install_face_refinement_patch()
 # that reference so Tonho's spoken commands use the live tracker state.
 _install_assistant_live_bridge_patch()
 # Add local date/date+time and web research. This installs after the live bridge
-# so web/date wrap the final live-aware command handler, then refreshes the
-# conversation module's captured answer_command reference again.
+# so web/date wrap the final live-aware command handler.
 _install_assistant_web_search_patch()
+# Command evaluation must be side-effect free. Only the live wake-word path may
+# emit the web-search preface; Tonho Lab/API calls stay silent unless they
+# explicitly request playback.
+_install_assistant_web_speech_guard_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -76,6 +80,7 @@ del _install_assistant_command_stt_patch
 del _install_assistant_wake_patch
 del _install_assistant_live_bridge_patch
 del _install_assistant_web_search_patch
+del _install_assistant_web_speech_guard_patch
 del _install_body_negative_backfill
 del _install_body_trust_sync_patch
 del _install_diagnostics_v5_patch
