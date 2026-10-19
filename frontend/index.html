@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="/v34.css" />
   <link rel="stylesheet" href="/v53-doorbell.css" data-poi-v53="1" />
   <link rel="stylesheet" href="/v54-pwa.css" data-poi-v54="1" />
+  <link rel="stylesheet" href="/v55-mobile-dashboard.css" data-poi-v55="1" />
 </head>
 <body>
   <div class="app-shell">
@@ -70,7 +71,7 @@
             <label>Até<input id="timelineDateTo" type="date" /></label>
             <label>Hora inicial<input id="timelineTimeFrom" type="time" step="60" /></label>
             <label>Hora final<input id="timelineTimeTo" type="time" step="60" /></label>
-            <label>Face<select id="timelineFace"><option value="">Com ou sem face</option><option value="1">Face detectada</option><option value="0">Sem face</option></select></label>
+            <label>Face<select id="timelineFace"><option value="">Com ou sem face</option><option value="1">Face detectada</option><option value="0">Sem face útil</option></select></label>
             <div class="timeline-filter-buttons"><button class="button ghost small" id="timelineClearFilters">Limpar</button><button class="button primary small" id="timelineRefresh">Aplicar filtros</button></div>
           </div>
           <div id="timelineGrid" class="timeline-grid"><p class="muted">Carregando eventos…</p></div>
@@ -148,6 +149,7 @@
   <script src="/v42-assistant.js" defer></script>
   <script src="/v53-doorbell.js" defer data-poi-v53="1"></script>
   <script src="/v54-pwa.js" defer data-poi-v54="1"></script>
+  <script src="/v55-mobile-dashboard.js" defer data-poi-v55="1"></script>
   <script src="/v49-identity-diagnostics.js" defer></script>
 </body>
 </html>
