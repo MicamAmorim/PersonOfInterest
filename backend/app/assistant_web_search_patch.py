@@ -17,11 +17,10 @@ from . import assistant_tools as tools
 from . import wake_word as ww
 
 
-WEB_SEARCH_PREFACE = "Certo, vou pesquisar agora."
+WEB_SEARCH_PREFACE = "Certo, espera um momento, vou pesquisar."
 WEB_SEARCH_TIMEOUT = max(2.0, min(20.0, float(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "8"))))
 WEB_SEARCH_RESULTS = max(2, min(8, int(os.getenv("WEB_SEARCH_RESULT_COUNT", "5"))))
-GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
-GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX", "").strip()
+SEARXNG_URL = os.getenv("SEARXNG_URL", "").strip().rstrip("/")
 
 
 @dataclass(slots=True)
@@ -98,6 +97,7 @@ def _request(url: str) -> bytes:
         url,
         headers={
             "User-Agent": "PersonOfInterest-Tonho/0.5 (+local assistant)",
+            "Accept": "application/json,text/html;q=0.8,*/*;q=0.5",
             "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
         },
     )
@@ -105,29 +105,39 @@ def _request(url: str) -> bytes:
         return response.read(1_500_000)
 
 
-def _google_search(query: str) -> list[WebResult]:
-    if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX:
+def _parse_searxng_payload(payload: dict[str, Any]) -> list[WebResult]:
+    output: list[WebResult] = []
+    for item in payload.get("results") or []:
+        if not isinstance(item, dict):
+            continue
+        title = _clean_text(str(item.get("title") or ""))
+        snippet = _clean_text(str(item.get("content") or item.get("snippet") or ""))
+        url = str(item.get("url") or "").strip()
+        if title or snippet:
+            output.append(WebResult(title=title, snippet=snippet, url=url))
+        if len(output) >= WEB_SEARCH_RESULTS:
+            break
+    return output
+
+
+def _searxng_search(query: str) -> list[WebResult]:
+    if not SEARXNG_URL:
         return []
     params = urllib.parse.urlencode(
         {
-            "key": GOOGLE_CSE_API_KEY,
-            "cx": GOOGLE_CSE_CX,
             "q": query,
-            "num": WEB_SEARCH_RESULTS,
-            "hl": "pt-BR",
-            "safe": "active",
+            "format": "json",
+            "language": "pt-BR",
+            "safesearch": "1",
+            "categories": "general",
         }
     )
-    payload = json.loads(_request(f"https://customsearch.googleapis.com/customsearch/v1?{params}").decode("utf-8", errors="replace"))
-    return [
-        WebResult(
-            title=_clean_text(str(item.get("title") or "")),
-            snippet=_clean_text(str(item.get("snippet") or "")),
-            url=str(item.get("link") or ""),
-        )
-        for item in payload.get("items") or []
-        if item.get("title") or item.get("snippet")
-    ]
+    payload = json.loads(
+        _request(f"{SEARXNG_URL}/search?{params}").decode("utf-8", errors="replace")
+    )
+    if not isinstance(payload, dict):
+        return []
+    return _parse_searxng_payload(payload)
 
 
 class _DuckParser(HTMLParser):
@@ -177,28 +187,28 @@ def _duckduckgo_search(query: str) -> list[WebResult]:
 
 
 def _provider() -> str:
-    return "google" if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX else "duckduckgo"
+    return "searxng" if SEARXNG_URL else "duckduckgo"
 
 
 def _search(query: str) -> tuple[list[WebResult], str]:
-    google_error: Exception | None = None
-    if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX:
+    searxng_error: Exception | None = None
+    if SEARXNG_URL:
         try:
-            results = _google_search(query)
+            results = _searxng_search(query)
             if results:
-                return results, "google"
+                return results, "searxng"
         except Exception as exc:
-            google_error = exc
+            searxng_error = exc
     try:
         results = _duckduckgo_search(query)
         if results:
             return results, "duckduckgo"
     except Exception:
-        if google_error:
-            raise google_error
+        if searxng_error:
+            raise searxng_error
         raise
-    if google_error:
-        raise google_error
+    if searxng_error:
+        raise searxng_error
     return [], _provider()
 
 
@@ -256,7 +266,6 @@ def _speak_preface(camera_id: int) -> None:
             voice_gender=str(settings.get("voice_gender") or "female"),
         )
     except Exception:
-        # A falha do preâmbulo não deve impedir a pesquisa nem a resposta final.
         return
 
 
@@ -302,11 +311,9 @@ def install() -> None:
     tools.answer_command = answer
     tools._poi_web_search_installed = True
 
-    # assistant_conversation_patch imports answer_command by value, so refresh it.
     from . import assistant_conversation_patch as conversation
     conversation.answer_command = tools.answer_command
 
-    # Surface the new commands and provider in Tonho's state/Lab.
     original_state = ww.WakeWordManager.state
 
     def state_with_web(self: Any) -> dict[str, Any]:
@@ -319,8 +326,9 @@ def install() -> None:
         data["web_search"] = {
             "enabled": True,
             "provider": _provider(),
-            "google_configured": bool(GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX),
-            "fallback": "duckduckgo" if not (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) else "duckduckgo_on_google_error",
+            "searxng_configured": bool(SEARXNG_URL),
+            "searxng_url": SEARXNG_URL or None,
+            "fallback": "duckduckgo",
             "timeout_seconds": WEB_SEARCH_TIMEOUT,
             "result_count": WEB_SEARCH_RESULTS,
         }
