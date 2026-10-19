@@ -21,6 +21,8 @@ A migração é aditiva. Na primeira inicialização da V5 são adicionados camp
 
 Nenhum evento antigo é apagado. Bodies `manual_verified*` permanecem confiáveis. Bodies automáticos `face_verified*` antigos ficam fora da galeria confiável até satisfazerem a regra temporal ou serem confirmados manualmente.
 
+A curadoria adiciona também estado explícito de ativação/desativação para amostras. Uma referência desativada é preservada para auditoria, mas é ignorada pelos matchers de Face e Body. Sincronizadores automáticos não podem reativar uma referência desativada pelo usuário.
+
 Antes do primeiro teste em máquina de produção, faça uma cópia de `data/person_of_interest.db`.
 
 ## Teste de aceitação em câmera real
@@ -72,6 +74,28 @@ Use **Importar imagem** e selecione `face`, `body` ou `both`.
 
 Esperado: a referência aparece na biblioteca e pode ser excluída individualmente sem apagar o histórico de eventos.
 
+### 6.1 Curadoria de referências
+
+A Biblioteca divide as referências em três grupos:
+
+- **Confiáveis** — participam da classificação;
+- **Quarentena** — bodies automáticos preservados, mas fora da galeria positiva;
+- **Desativadas** — preservadas para auditoria e completamente ignoradas pelo matcher.
+
+Ações disponíveis por referência:
+
+- **Desativar / Ativar** — remove ou devolve a referência ao uso sem apagá-la;
+- **Confiar** — disponível para body em quarentena; transforma a confirmação visual do usuário em âncora corporal manual confiável;
+- **Mover para…** — reatribui uma face ou body a outra pessoa;
+- **Excluir** — remove definitivamente a referência.
+
+Ao mover uma referência que nasceu de um evento, a interface oferece duas opções:
+
+1. **Mover somente a referência**: o evento histórico permanece com a identidade original. A nova pessoa recebe uma âncora manual independente e a amostra histórica original fica desativada.
+2. **Corrigir também o evento**: evento, face/body e proveniência são sincronizados para a nova pessoa. A operação é manual e permanece inelegível para cumprimento do Tonho.
+
+Esperado: uma referência desativada nunca volta a participar sozinha após reindexação, sincronização corporal ou promoção automática de Body ReID.
+
 ### 7. Classificação manual e Tonho
 
 1. Gere um evento desconhecido.
@@ -121,9 +145,10 @@ Esperado: exclusão individual, em lote e total continuam funcionando. Um track 
 O botão **Exportar diagnóstico** continua gerando o pacote de calibração e agora acrescenta:
 
 - `body_trust_metadata.csv`
+- `face_curation_metadata.csv`
 - `track_lifecycle_metadata.csv`
 
-O `manifest.json` informa quantas referências corporais estão confiáveis, em quarentena e temporalmente agregadas. O pacote não inclui embeddings brutos nem imagens.
+O `manifest.json` informa quantas referências corporais estão confiáveis, em quarentena, desativadas e temporalmente agregadas. O pacote não inclui embeddings brutos nem imagens.
 
 ## Recalibração posterior
 
