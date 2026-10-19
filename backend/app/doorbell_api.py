@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from .doorbell import DINGDONG_FILENAME, manager
 from .spatial_alerts import manager as spatial_manager
@@ -24,14 +24,6 @@ class DoorbellRingPayload(BaseModel):
     local_name: str = Field(default="", max_length=80)
     dingdong: bool = True
     voice: bool = False
-
-    @model_validator(mode="after")
-    def validate_output(self) -> "DoorbellRingPayload":
-        if not self.dingdong and not self.voice:
-            raise ValueError("Ative o ding-dong, a mensagem de voz ou ambos")
-        if self.voice and not self.local_name.strip():
-            raise ValueError("Informe o nome deste aparelho para usar a mensagem de voz")
-        return self
 
 
 class SpatialDoorbellPayload(BaseModel):
@@ -60,6 +52,10 @@ def update_doorbell_settings(payload: DoorbellSettingsPayload) -> dict:
 
 @router.post("/api/doorbell/ring")
 def ring_doorbell(payload: DoorbellRingPayload) -> dict:
+    if not payload.dingdong and not payload.voice:
+        raise HTTPException(status_code=400, detail="Ative o ding-dong, a mensagem de voz ou ambos")
+    if payload.voice and not payload.local_name.strip():
+        raise HTTPException(status_code=400, detail="Informe o nome deste aparelho para usar a mensagem de voz")
     try:
         result = manager.queue_ring(
             local_name=payload.local_name,
