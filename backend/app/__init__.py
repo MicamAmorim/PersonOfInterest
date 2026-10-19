@@ -12,6 +12,7 @@ from .assistant_web_search_patch import install as _install_assistant_web_search
 from .assistant_web_fallback_patch import install as _install_assistant_web_fallback_patch
 from .assistant_web_speech_guard_patch import install as _install_assistant_web_speech_guard_patch
 from .assistant_talkback_guard_patch import install as _install_assistant_talkback_guard_patch
+from .analytics_v55_patch import install as _install_analytics_v55_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .body_trust_sync_patch import install as _install_body_trust_sync_patch
 from .diagnostics_v5_patch import install as _install_diagnostics_v5_patch
@@ -46,6 +47,9 @@ _install_ptz_safety_patch()
 # V5 owns persistent track lifecycle, temporal body evidence, trusted galleries,
 # live scene access and manual-review provenance. Spatial rules observe it after.
 _install_tracking_v5_patch()
+# Analytics is read-only and intentionally sits above the V5 lifecycle schema.
+# It never mutates events or participates in detection/tracking/ReID.
+_install_analytics_v55_patch()
 # Timeline/UI snapshots keep the familiar BB overlay while Face/Body ReID read
 # the separate clean best/trigger frames. The display BB stays synchronized with
 # the same frame selected as the best event snapshot.
@@ -100,6 +104,7 @@ del _install_assistant_web_search_patch
 del _install_assistant_web_fallback_patch
 del _install_assistant_web_speech_guard_patch
 del _install_assistant_talkback_guard_patch
+del _install_analytics_v55_patch
 del _install_body_negative_backfill
 del _install_body_trust_sync_patch
 del _install_diagnostics_v5_patch
