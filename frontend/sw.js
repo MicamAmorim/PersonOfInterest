@@ -1,10 +1,10 @@
-const CACHE = 'personofinterest-v5.6-viewer-fullscreen';
+const CACHE = 'personofinterest-v5.7-device-push';
 const SHELL = [
   '/', '/styles.css', '/v2.css', '/v34.css', '/v48-spatial.css',
   '/v50-persistent.css', '/v52-library-viewer.css', '/v53-doorbell.css', '/v54-pwa.css', '/v55-mobile-dashboard.css', '/v56-viewer-ux.css',
   '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/v4-audio-fix.js',
   '/v42-assistant.js', '/v48-spatial-alerts.js', '/v49-identity-diagnostics.js',
-  '/v50-persistent.js', '/v51-live-overlay.js', '/v52-library-viewer.js', '/v53-doorbell.js', '/v54-pwa.js', '/v55-mobile-dashboard.js', '/v56-viewer-ux.js',
+  '/v50-persistent.js', '/v51-live-overlay.js', '/v52-library-viewer.js', '/v53-doorbell.js', '/v54-pwa.js', '/v55-mobile-dashboard.js', '/v56-viewer-ux.js', '/v57-device-push.js',
   '/camera-webrtc.html', '/tonho-lab.html', '/manifest.webmanifest', '/icon.svg'
 ];
 
