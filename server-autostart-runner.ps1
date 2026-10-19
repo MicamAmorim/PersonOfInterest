@@ -38,12 +38,11 @@ if (-not (Test-Path $StartScript)) {
 Write-AutostartLog "Iniciando PersonOfInterest em modo servidor (-NoBrowser)."
 try {
     & $StartScript -NoBrowser *>> $LogPath
-    $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
-    Write-AutostartLog "start.ps1 encerrou com código $exitCode."
-    # A tarefa agendada está configurada para reiniciar em caso de falha. Se o
-    # servidor encerrou sozinho, tratamos isso como falha para permitir recovery.
-    if ($exitCode -eq 0) { exit 1 }
-    exit $exitCode
+    Write-AutostartLog "start.ps1 encerrou. A tarefa sinalizará falha para permitir recovery automático."
+    # O start.ps1 normalmente permanece vivo enquanto o backend está ativo.
+    # Se ele retorna sem exceção, consideramos encerramento inesperado para que
+    # a política de restart do Agendador possa tentar novamente.
+    exit 1
 } catch {
     Write-AutostartLog "ERRO: $($_.Exception.Message)"
     exit 1
