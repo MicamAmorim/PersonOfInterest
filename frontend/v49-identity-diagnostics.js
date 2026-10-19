@@ -63,6 +63,13 @@
       script.dataset.poiV54 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v57-push]')) {
+      const script = document.createElement('script');
+      script.src = '/v57-device-push.js';
+      script.defer = true;
+      script.dataset.poiV57Push = '1';
+      document.body.appendChild(script);
+    }
   }
 
   function install() {
