@@ -1,4 +1,4 @@
-const CACHE = 'personofinterest-v5.3-doorbell';
+const CACHE = 'personofinterest-v5.3.1-doorbell-direct';
 const SHELL = [
   '/', '/styles.css', '/v2.css', '/v34.css', '/v48-spatial.css',
   '/v50-persistent.css', '/v52-library-viewer.css', '/v53-doorbell.css',
@@ -23,7 +23,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || event.request.url.includes('/api/') || event.request.url.includes('/go2rtc/')) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: 'no-store' })
       .then((response) => {
         const clone = response.clone();
         caches.open(CACHE).then((cache) => cache.put(event.request, clone));
