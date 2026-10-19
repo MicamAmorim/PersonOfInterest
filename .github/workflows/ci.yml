@@ -24,3 +24,4 @@ jobs:
       - run: node --check frontend/v49-identity-diagnostics.js
       - run: node --check frontend/v50-persistent.js
       - run: node --check frontend/v51-live-overlay.js
+      - run: node --check frontend/v52-library-viewer.js
