@@ -79,7 +79,7 @@ def poi_health(port: int) -> bool:
 
 
 def go2rtc_health() -> bool:
-    return http_json("http://127.0.0.1:1984/api") is not None
+    return http_json("http://127.0.0.1:1984/api/streams") is not None
 
 
 def ensure_download(path: Path, url: str, minimum_bytes: int, label: str) -> Path:
