@@ -21,6 +21,8 @@ WEB_SEARCH_PREFACE = "Certo, espera um momento, vou pesquisar."
 WEB_SEARCH_TIMEOUT = max(2.0, min(20.0, float(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "8"))))
 WEB_SEARCH_RESULTS = max(2, min(8, int(os.getenv("WEB_SEARCH_RESULT_COUNT", "5"))))
 SEARXNG_URL = os.getenv("SEARXNG_URL", "").strip().rstrip("/")
+SEARXNG_LOCAL_URL = os.getenv("SEARXNG_LOCAL_URL", "http://127.0.0.1:8888").strip().rstrip("/")
+SEARXNG_PROBE_TIMEOUT = max(0.25, min(2.0, float(os.getenv("SEARXNG_PROBE_TIMEOUT_SECONDS", "0.75"))))
 
 
 @dataclass(slots=True)
@@ -55,6 +57,13 @@ def _looks_like_date_time_question(q: str) -> bool:
     return has_date and has_time
 
 
+def _cleanup_spoken_query(query: str) -> str:
+    value = query.strip(" .?!:;,-")
+    value = re.sub(r"^\s*(?:para\s+mim|por\s+favor)\s*[,;:\-]?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
 def _extract_web_query(text: str) -> str | None:
     value = (text or "").strip()
     if not value:
@@ -66,7 +75,7 @@ def _extract_web_query(text: str) -> str | None:
     for pattern in patterns:
         match = re.match(pattern, value, flags=re.IGNORECASE)
         if match:
-            query = match.group(1).strip(" .?!:;,-")
+            query = _cleanup_spoken_query(match.group(1))
             return query or None
     return None
 
@@ -92,7 +101,7 @@ def _clean_text(value: str) -> str:
     return " ".join(value.split())
 
 
-def _request(url: str) -> bytes:
+def _request(url: str, *, timeout: float | None = None) -> bytes:
     request = urllib.request.Request(
         url,
         headers={
@@ -101,12 +110,23 @@ def _request(url: str) -> bytes:
             "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
         },
     )
-    with urllib.request.urlopen(request, timeout=WEB_SEARCH_TIMEOUT) as response:
+    with urllib.request.urlopen(request, timeout=timeout or WEB_SEARCH_TIMEOUT) as response:
         return response.read(1_500_000)
 
 
 def _parse_searxng_payload(payload: dict[str, Any]) -> list[WebResult]:
     output: list[WebResult] = []
+
+    for answer in payload.get("answers") or []:
+        if isinstance(answer, str):
+            snippet = _clean_text(answer)
+        elif isinstance(answer, dict):
+            snippet = _clean_text(str(answer.get("answer") or answer.get("content") or answer.get("title") or ""))
+        else:
+            snippet = ""
+        if snippet:
+            output.append(WebResult(title="Resposta direta", snippet=snippet, url=""))
+
     for item in payload.get("results") or []:
         if not isinstance(item, dict):
             continue
@@ -117,12 +137,42 @@ def _parse_searxng_payload(payload: dict[str, Any]) -> list[WebResult]:
             output.append(WebResult(title=title, snippet=snippet, url=url))
         if len(output) >= WEB_SEARCH_RESULTS:
             break
-    return output
+
+    if len(output) < WEB_SEARCH_RESULTS:
+        for item in payload.get("infoboxes") or []:
+            if not isinstance(item, dict):
+                continue
+            title = _clean_text(str(item.get("infobox") or item.get("title") or ""))
+            snippet = _clean_text(str(item.get("content") or ""))
+            urls = item.get("urls") or []
+            url = ""
+            if urls and isinstance(urls[0], dict):
+                url = str(urls[0].get("url") or "")
+            if title or snippet:
+                output.append(WebResult(title=title, snippet=snippet, url=url))
+            if len(output) >= WEB_SEARCH_RESULTS:
+                break
+
+    return output[:WEB_SEARCH_RESULTS]
 
 
-def _searxng_search(query: str) -> list[WebResult]:
-    if not SEARXNG_URL:
-        return []
+def _alternative_queries(payload: dict[str, Any]) -> list[str]:
+    alternatives: list[str] = []
+    for field, key in (("corrections", "correction"), ("suggestions", "suggestion")):
+        for item in payload.get(field) or []:
+            if isinstance(item, str):
+                candidate = item
+            elif isinstance(item, dict):
+                candidate = str(item.get(key) or item.get("title") or "")
+            else:
+                candidate = ""
+            candidate = _cleanup_spoken_query(candidate)
+            if candidate and candidate not in alternatives:
+                alternatives.append(candidate)
+    return alternatives[:3]
+
+
+def _searxng_payload(base_url: str, query: str) -> dict[str, Any]:
     params = urllib.parse.urlencode(
         {
             "q": query,
@@ -133,11 +183,51 @@ def _searxng_search(query: str) -> list[WebResult]:
         }
     )
     payload = json.loads(
-        _request(f"{SEARXNG_URL}/search?{params}").decode("utf-8", errors="replace")
+        _request(f"{base_url}/search?{params}").decode("utf-8", errors="replace")
     )
-    if not isinstance(payload, dict):
-        return []
-    return _parse_searxng_payload(payload)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _candidate_searxng_urls() -> list[str]:
+    urls: list[str] = []
+    for value in (SEARXNG_URL, SEARXNG_LOCAL_URL):
+        clean = (value or "").strip().rstrip("/")
+        if clean and clean not in urls:
+            urls.append(clean)
+    return urls
+
+
+def _searxng_reachable(base_url: str) -> bool:
+    try:
+        _request(f"{base_url}/config", timeout=SEARXNG_PROBE_TIMEOUT)
+        return True
+    except Exception:
+        return False
+
+
+def _searxng_search(query: str) -> tuple[list[WebResult], str | None]:
+    last_error: Exception | None = None
+    for base_url in _candidate_searxng_urls():
+        if not _searxng_reachable(base_url):
+            continue
+        try:
+            payload = _searxng_payload(base_url, query)
+            results = _parse_searxng_payload(payload)
+            if results:
+                return results, base_url
+
+            for alternative in _alternative_queries(payload):
+                if tools.normalize_text(alternative) == tools.normalize_text(query):
+                    continue
+                retry_payload = _searxng_payload(base_url, alternative)
+                results = _parse_searxng_payload(retry_payload)
+                if results:
+                    return results, base_url
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    return [], None
 
 
 class _DuckParser(HTMLParser):
@@ -179,7 +269,38 @@ class _DuckParser(HTMLParser):
             self._buffer = []
 
 
+def _duckduckgo_instant(query: str) -> list[WebResult]:
+    params = urllib.parse.urlencode(
+        {
+            "q": query,
+            "format": "json",
+            "no_html": "1",
+            "skip_disambig": "1",
+            "no_redirect": "1",
+        }
+    )
+    payload = json.loads(_request(f"https://api.duckduckgo.com/?{params}").decode("utf-8", errors="replace"))
+    output: list[WebResult] = []
+    abstract = _clean_text(str(payload.get("AbstractText") or "")) if isinstance(payload, dict) else ""
+    if abstract:
+        output.append(
+            WebResult(
+                title=_clean_text(str(payload.get("Heading") or "Resposta")),
+                snippet=abstract,
+                url=str(payload.get("AbstractURL") or ""),
+            )
+        )
+    return output
+
+
 def _duckduckgo_search(query: str) -> list[WebResult]:
+    try:
+        instant = _duckduckgo_instant(query)
+        if instant:
+            return instant[:WEB_SEARCH_RESULTS]
+    except Exception:
+        pass
+
     encoded = urllib.parse.urlencode({"q": query, "kl": "br-pt"})
     parser = _DuckParser()
     parser.feed(_request(f"https://html.duckduckgo.com/html/?{encoded}").decode("utf-8", errors="replace"))
@@ -187,18 +308,18 @@ def _duckduckgo_search(query: str) -> list[WebResult]:
 
 
 def _provider() -> str:
-    return "searxng" if SEARXNG_URL else "duckduckgo"
+    return "searxng" if _candidate_searxng_urls() else "duckduckgo"
 
 
 def _search(query: str) -> tuple[list[WebResult], str]:
     searxng_error: Exception | None = None
-    if SEARXNG_URL:
-        try:
-            results = _searxng_search(query)
-            if results:
-                return results, "searxng"
-        except Exception as exc:
-            searxng_error = exc
+    try:
+        results, base_url = _searxng_search(query)
+        if results and base_url:
+            return results, "searxng"
+    except Exception as exc:
+        searxng_error = exc
+
     try:
         results = _duckduckgo_search(query)
         if results:
@@ -207,9 +328,10 @@ def _search(query: str) -> tuple[list[WebResult], str]:
         if searxng_error:
             raise searxng_error
         raise
+
     if searxng_error:
         raise searxng_error
-    return [], _provider()
+    return [], "duckduckgo"
 
 
 def _domain_label(url: str) -> str:
@@ -248,7 +370,7 @@ def _summarize(query: str, results: list[WebResult]) -> str:
     sources: list[str] = []
     for result in results:
         label = _domain_label(result.url)
-        if label not in sources:
+        if label != "web" and label not in sources:
             sources.append(label)
         if len(sources) >= 3:
             break
@@ -327,7 +449,8 @@ def install() -> None:
             "enabled": True,
             "provider": _provider(),
             "searxng_configured": bool(SEARXNG_URL),
-            "searxng_url": SEARXNG_URL or None,
+            "searxng_autodiscovery": SEARXNG_LOCAL_URL or None,
+            "searxng_candidates": _candidate_searxng_urls(),
             "fallback": "duckduckgo",
             "timeout_seconds": WEB_SEARCH_TIMEOUT,
             "result_count": WEB_SEARCH_RESULTS,
