@@ -8,11 +8,24 @@ services:
       DATA_DIR: /app/data
       GO2RTC_API_URL: ${GO2RTC_API_URL:-http://go2rtc:1984}
       GO2RTC_BROWSER_BASE: /go2rtc
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       TZ: ${TZ:-America/Bahia}
     volumes:
       - ./data:/app/data
     depends_on:
       - go2rtc
+      - searxng
+
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-personofinterest-local-search}
+    volumes:
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8888:8080"
 
   go2rtc:
     image: alexxit/go2rtc:latest
