@@ -23,7 +23,7 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
     throw "Python 3.11+ não encontrado."
 }
 
-$BuildVenv = Join-Path $Root ".build-venv"
+$BuildVenv = Join-Path $Root ".build-venv-windows"
 $BuildPython = Join-Path $BuildVenv "Scripts\python.exe"
 if (-not (Test-Path $BuildPython)) {
     Write-Host "Criando ambiente isolado de build..."
