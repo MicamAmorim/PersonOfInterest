@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">V5 · IDENTIDADE PERSISTENTE</p>
           <h2>Biblioteca de pessoas</h2>
-          <p class="muted paragraph">Face é identidade forte. Corpo é evidência provável agregada no tempo. Referências automáticas só entram na galeria corporal após estabilidade temporal.</p>
+          <p class="muted paragraph">Face é identidade forte. Corpo é evidência provável agregada no tempo. Referências podem ser confiadas, desativadas ou movidas sem apagar o histórico.</p>
         </div>
         <div class="identity-actions">
           <button class="button ghost small" id="v5PeopleRefresh">↻ Atualizar</button>
@@ -38,7 +38,7 @@
     if (!ensurePanel()) return;
     const grid = document.getElementById('v5PeopleGrid');
     try {
-      V5.people = await api('/api/v5/persons');
+      V5.people = await api('/api/v5/curation/persons');
       if (!V5.people.length) {
         grid.innerHTML = '<div class="empty-state compact"><div class="empty-icon">◎</div><h3>Nenhuma pessoa cadastrada</h3><p>Crie uma pessoa e adicione referências pela câmera ou por imagem.</p></div>';
         return;
@@ -49,9 +49,10 @@
             <div class="v5-person-avatar">${q(person.name).slice(0, 1).toUpperCase()}</div>
             <div class="v5-person-name"><strong>${q(person.name)}</strong><span>${person.event_count || 0} evento(s)</span></div>
             <div class="v5-person-metrics">
-              <span title="Referências faciais"><b>${person.face_reference_count || 0}</b> face</span>
-              <span title="Âncoras corporais confiáveis"><b>${person.trusted_body_reference_count || 0}</b> body confiável</span>
-              <span class="${person.quarantined_body_count ? 'warning' : ''}" title="Bodies automáticos fora da galeria confiável"><b>${person.quarantined_body_count || 0}</b> quarentena</span>
+              <span title="Faces ativas"><b>${person.face_reference_count || 0}</b> face</span>
+              <span title="Referências corporais confiáveis"><b>${person.trusted_body_reference_count || 0}</b> body confiável</span>
+              <span class="${person.quarantined_body_count ? 'warning' : ''}" title="Bodies aguardando validação"><b>${person.quarantined_body_count || 0}</b> quarentena</span>
+              <span class="${person.disabled_reference_count ? 'disabled' : ''}" title="Referências preservadas, mas ignoradas pelo matcher"><b>${person.disabled_reference_count || 0}</b> desativadas</span>
             </div>
           </div>
           <div class="v5-person-actions">
@@ -101,15 +102,42 @@
     await loadReferences(personId, true);
   }
 
-  function referenceCard(personId, item, type) {
-    const trusted = type === 'body' ? (item.trusted ? '<span class="v5-trust trusted">confiável</span>' : '<span class="v5-trust quarantine">quarentena</span>') : '';
+  function stateBadge(item) {
+    if (item.state === 'disabled') return '<span class="v5-trust disabled">desativada</span>';
+    if (item.state === 'quarantine') return '<span class="v5-trust quarantine">quarentena</span>';
+    return '<span class="v5-trust trusted">confiável</span>';
+  }
+
+  function referenceCard(personId, item) {
     const support = item.temporal_support ? ` · ${item.temporal_support} obs.` : '';
     const stability = item.stability != null ? ` · estabilidade ${pct(item.stability)}` : '';
-    return `<article class="v5-ref-card">
+    const typeLabel = item.type === 'face' ? 'Face' : 'Body';
+    const toggleLabel = item.active ? 'Desativar' : 'Ativar';
+    const trustAction = item.state === 'quarantine' && item.ref_kind === 'body-event'
+      ? `<button class="button ghost tiny positive" data-v5-trust-ref="${personId}|${q(item.ref_kind)}|${item.id}">Confiar</button>`
+      : '';
+    return `<article class="v5-ref-card ${item.state}">
       <div class="v5-ref-image">${item.image_url ? `<img src="${q(item.image_url)}" loading="lazy" alt="Referência">` : '<span>sem imagem</span>'}</div>
-      <div class="v5-ref-meta"><strong>${type === 'face' ? 'Face' : 'Body'} ${trusted}</strong><span>${q(item.source || 'histórico')}</span><span>qualidade ${pct(item.quality)}${support}${stability}</span><span>${when(item.created_at)}</span></div>
-      <button class="event-delete v5-ref-delete" data-v5-remove-ref="${personId}|${q(item.ref_kind)}|${item.id}" title="Excluir referência">×</button>
+      <div class="v5-ref-meta">
+        <strong>${typeLabel} ${stateBadge(item)}</strong>
+        <span>${q(item.source || 'histórico')}</span>
+        <span>qualidade ${pct(item.quality)}${support}${stability}</span>
+        <span>${when(item.created_at)}</span>
+      </div>
+      <div class="v5-ref-actions">
+        ${trustAction}
+        <button class="button ghost tiny" data-v5-toggle-ref="${personId}|${q(item.ref_kind)}|${item.id}|${item.active ? '0' : '1'}">${toggleLabel}</button>
+        <button class="button ghost tiny" data-v5-move-ref="${personId}|${q(item.ref_kind)}|${item.id}|${item.event_id || ''}">Mover para…</button>
+        <button class="button ghost tiny danger" data-v5-remove-ref="${personId}|${q(item.ref_kind)}|${item.id}">Excluir</button>
+      </div>
     </article>`;
+  }
+
+  function groupBlock(title, subtitle, items, cls) {
+    return `<section class="v5-curation-group ${cls}">
+      <div class="v5-curation-heading"><div><h4>${title} <span>${items.length}</span></h4><p>${subtitle}</p></div></div>
+      <div class="v5-ref-grid">${items.length ? items.map(item => referenceCard(item.person_id || '', item)).join('') : '<p class="muted">Nenhuma referência neste grupo.</p>'}</div>
+    </section>`;
   }
 
   async function loadReferences(personId, showLoading = true) {
@@ -117,20 +145,92 @@
     if (!area || area.hidden) return;
     if (showLoading) area.innerHTML = '<p class="muted">Carregando referências…</p>';
     try {
-      const data = await api(`/api/v5/persons/${personId}/references`);
-      area.innerHTML = `
-        <div class="v5-ref-section"><h4>Faces <span>${data.face.length}</span></h4><div class="v5-ref-grid">${data.face.length ? data.face.map(item => referenceCard(personId, item, 'face')).join('') : '<p class="muted">Sem referências faciais.</p>'}</div></div>
-        <div class="v5-ref-section"><h4>Corpo <span>${data.body.length}</span></h4><div class="v5-ref-grid">${data.body.length ? data.body.map(item => referenceCard(personId, item, 'body')).join('') : '<p class="muted">Sem referências corporais.</p>'}</div></div>`;
-      area.querySelectorAll('[data-v5-remove-ref]').forEach(el => el.addEventListener('click', async () => {
-        const [pid, kind, id] = el.dataset.v5RemoveRef.split('|');
-        if (!confirm('Excluir somente esta referência?')) return;
-        try {
-          await api(`/api/v5/persons/${pid}/references/${kind}/${id}`, { method: 'DELETE' });
-          toast('Referência excluída.');
-          await Promise.all([loadReferences(Number(pid), false), loadPeople()]);
-        } catch (error) { toast(error.message, 'error'); }
-      }));
+      const data = await api(`/api/v5/curation/persons/${personId}/references`);
+      const trusted = (data.groups.trusted || []).map(item => ({ ...item, person_id: personId }));
+      const quarantine = (data.groups.quarantine || []).map(item => ({ ...item, person_id: personId }));
+      const disabled = (data.groups.disabled || []).map(item => ({ ...item, person_id: personId }));
+      area.innerHTML = [
+        groupBlock('Confiáveis', 'Participam da classificação. Faces ativas e bodies validados ficam aqui.', trusted, 'trusted'),
+        groupBlock('Quarentena', 'Bodies automáticos preservados, mas ainda fora da galeria positiva. Você pode validar manualmente com “Confiar”.', quarantine, 'quarantine'),
+        groupBlock('Desativadas', 'Continuam disponíveis para auditoria, mas são completamente ignoradas pelo matcher.', disabled, 'disabled'),
+      ].join('');
+      bindReferenceActions(area, personId);
     } catch (error) { area.innerHTML = `<p class="muted">${q(error.message)}</p>`; }
+  }
+
+  function bindReferenceActions(area, personId) {
+    area.querySelectorAll('[data-v5-toggle-ref]').forEach(el => el.addEventListener('click', async () => {
+      const [pid, kind, id, active] = el.dataset.v5ToggleRef.split('|');
+      try {
+        await api(`/api/v5/curation/persons/${pid}/references/${kind}/${id}/state`, {
+          method: 'PATCH', body: JSON.stringify({ active: active === '1' }),
+        });
+        toast(active === '1' ? 'Referência ativada.' : 'Referência desativada.');
+        await Promise.all([loadReferences(Number(pid), false), loadPeople()]);
+      } catch (error) { toast(error.message, 'error'); }
+    }));
+
+    area.querySelectorAll('[data-v5-trust-ref]').forEach(el => el.addEventListener('click', async () => {
+      const [pid, kind, id] = el.dataset.v5TrustRef.split('|');
+      if (!confirm('Você confirma manualmente que este corpo pertence a esta pessoa? Ele passará a participar do Body ReID como referência confiável.')) return;
+      try {
+        await api(`/api/v5/curation/persons/${pid}/references/${kind}/${id}/state`, {
+          method: 'PATCH', body: JSON.stringify({ trusted: true }),
+        });
+        toast('Body validado e promovido para confiável.');
+        await Promise.all([loadReferences(Number(pid), false), loadPeople()]);
+      } catch (error) { toast(error.message, 'error'); }
+    }));
+
+    area.querySelectorAll('[data-v5-move-ref]').forEach(el => el.addEventListener('click', async () => {
+      const [pid, kind, id, eventId] = el.dataset.v5MoveRef.split('|');
+      await moveReference(Number(pid), kind, Number(id), eventId ? Number(eventId) : null);
+    }));
+
+    area.querySelectorAll('[data-v5-remove-ref]').forEach(el => el.addEventListener('click', async () => {
+      const [pid, kind, id] = el.dataset.v5RemoveRef.split('|');
+      if (!confirm('Excluir definitivamente esta referência? Se você só quer tirá-la da classificação, prefira “Desativar”.')) return;
+      try {
+        await api(`/api/v5/persons/${pid}/references/${kind}/${id}`, { method: 'DELETE' });
+        toast('Referência excluída.');
+        await Promise.all([loadReferences(Number(pid), false), loadPeople()]);
+      } catch (error) { toast(error.message, 'error'); }
+    }));
+  }
+
+  async function moveReference(personId, refKind, referenceId, eventId) {
+    const candidates = V5.people.filter(person => Number(person.id) !== Number(personId));
+    if (!candidates.length) { toast('Cadastre outra pessoa antes de mover a referência.', 'error'); return; }
+    const source = V5.people.find(person => Number(person.id) === Number(personId));
+    const options = candidates.map(person => `${person.id}: ${person.name}`).join('\n');
+    const raw = prompt(`Mover referência de ${source?.name || 'esta pessoa'} para quem?\n${options}`, String(candidates[0].id));
+    if (raw === null) return;
+    const target = candidates.find(person => Number(person.id) === Number(raw));
+    if (!target) { toast('Pessoa de destino inválida.', 'error'); return; }
+
+    let syncEvent = false;
+    if (eventId) {
+      syncEvent = confirm(
+        `Esta referência nasceu do evento #${eventId}.\n\nOK: corrigir também o evento original para ${target.name}.\nCancelar: mover só a referência e preservar a identidade histórica do evento.`
+      );
+    }
+    if (!confirm(`Confirmar a reatribuição para ${target.name}${syncEvent ? ' e corrigir também o evento' : ''}?`)) return;
+
+    try {
+      const result = await api(`/api/v5/curation/persons/${personId}/references/${refKind}/${referenceId}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ target_person_id: target.id, sync_event: syncEvent }),
+      });
+      toast(syncEvent
+        ? `Referência e evento reatribuídos para ${target.name}.`
+        : `Referência movida para ${target.name}; evento histórico preservado.`);
+      await Promise.all([
+        loadPeople(),
+        loadReferences(personId, false),
+        V5.opened.has(Number(target.id)) ? loadReferences(Number(target.id), false) : Promise.resolve(),
+        typeof loadEvents === 'function' ? loadEvents() : Promise.resolve(),
+      ]);
+    } catch (error) { toast(error.message, 'error'); }
   }
 
   function chooseCamera() {
