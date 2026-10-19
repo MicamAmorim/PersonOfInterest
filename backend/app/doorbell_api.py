@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
 from .doorbell import DINGDONG_FILENAME, manager
+from .spatial_alerts import manager as spatial_manager
 
 
 router = APIRouter()
@@ -75,11 +76,13 @@ def ring_doorbell(payload: DoorbellRingPayload) -> dict:
 
 @router.get("/api/doorbell/spatial-rules")
 def list_doorbell_spatial_rules() -> list[dict]:
+    spatial_manager.ensure_schema()
     return manager.spatial_rules()
 
 
 @router.put("/api/doorbell/spatial-rules/{rule_id}")
 def set_doorbell_spatial_rule(rule_id: int, payload: SpatialDoorbellPayload) -> dict:
+    spatial_manager.ensure_schema()
     try:
         return manager.set_spatial_rule(rule_id, payload.enabled)
     except LookupError as exc:
