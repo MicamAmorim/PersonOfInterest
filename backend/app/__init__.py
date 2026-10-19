@@ -19,6 +19,7 @@ from .identity_safety_patch import install as _install_identity_safety_patch
 from .manual_integrity_v5_patch import install as _install_manual_integrity_v5_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
+from .reference_curator_patch import install as _install_reference_curator_patch
 from .tracking_v5_patch import install as _install_tracking_v5_patch
 from .spatial_vision_patch import install as _install_spatial_vision_patch
 
@@ -45,6 +46,9 @@ _install_manual_integrity_v5_patch()
 # BodyIdentity's legacy label synchronizer would otherwise collapse
 # face_verified_trusted back to face_verified after each poll/restart.
 _install_body_trust_sync_patch()
+# User curation sits on top of automatic trust: disabled references stay disabled,
+# quarantine can be manually trusted, and face/body refs can be reassigned safely.
+_install_reference_curator_patch()
 # Legacy Body/Push workers must not race the collecting phase of an active track.
 _install_event_lifecycle_patch()
 # If an initially-unknown track yields a substantially better face later, refine
@@ -77,5 +81,6 @@ del _install_identity_safety_patch
 del _install_manual_integrity_v5_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
+del _install_reference_curator_patch
 del _install_tracking_v5_patch
 del _install_spatial_vision_patch
