@@ -21,3 +21,5 @@ jobs:
       - run: node --check frontend/v4-stream-fix.js
       - run: node --check frontend/v4-audio-fix.js
       - run: node --check frontend/v42-assistant.js
+      - run: node --check frontend/v49-identity-diagnostics.js
+      - run: node --check frontend/v50-persistent.js
