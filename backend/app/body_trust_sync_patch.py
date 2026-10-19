@@ -31,7 +31,10 @@ def _sync_verified_labels_v5(self: Any) -> None:
             event_person = row["event_person"]
             if event_person is None:
                 continue
-            manual = str(row["identity_origin"] or "") == "manual"
+            source = str(row["source"] or "")
+            # Existing databases predate identity_origin. Their durable provenance
+            # is the body sample source, so keep manual_verified variants trusted.
+            manual = str(row["identity_origin"] or "") == "manual" or "manual" in source
             face_verified = bool(row["face_verified"])
             support = int(row["temporal_support"] or 1)
             stability = float(row["stability"] or 0.0)
@@ -49,11 +52,11 @@ def _sync_verified_labels_v5(self: Any) -> None:
                 desired_source = "face_verified_trusted"
                 desired_trusted = 1
             else:
-                desired_source = "face_verified" if face_verified else str(row["source"] or "unlabeled")
+                desired_source = "face_verified" if face_verified else (source or "unlabeled")
                 desired_trusted = 0
             if (
                 row["sample_person"] != event_person
-                or str(row["source"] or "") != desired_source
+                or source != desired_source
                 or int(row["trusted"] or 0) != desired_trusted
             ):
                 conn.execute(
