@@ -16,6 +16,7 @@ from .analytics_v55_patch import install as _install_analytics_v55_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
 from .body_trust_sync_patch import install as _install_body_trust_sync_patch
 from .diagnostics_v5_patch import install as _install_diagnostics_v5_patch
+from .device_push_pause_patch import install as _install_device_push_pause_patch
 from .doorbell_patch import install as _install_doorbell_patch
 from .event_lifecycle_patch import install as _install_event_lifecycle_patch
 from .face_refinement_patch import install as _install_face_refinement_patch
@@ -87,6 +88,9 @@ _install_assistant_talkback_guard_patch()
 # Campainha is additive: device-local manual profiles, shared speaker targets,
 # optional spatial triggers and Tonho's face-aware arrival Push command.
 _install_doorbell_patch()
+# Notification pause is scoped to the current browser Push endpoint only; it
+# never disables global alert rules or another phone/PC subscription.
+_install_device_push_pause_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -108,6 +112,7 @@ del _install_analytics_v55_patch
 del _install_body_negative_backfill
 del _install_body_trust_sync_patch
 del _install_diagnostics_v5_patch
+del _install_device_push_pause_patch
 del _install_doorbell_patch
 del _install_event_lifecycle_patch
 del _install_face_refinement_patch
