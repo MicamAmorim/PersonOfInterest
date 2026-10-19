@@ -16,6 +16,7 @@ from .face_refinement_patch import install as _install_face_refinement_patch
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
 from .identity_manual_guard_patch import install as _install_identity_manual_guard_patch
 from .identity_safety_patch import install as _install_identity_safety_patch
+from .manual_integrity_v5_patch import install as _install_manual_integrity_v5_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
 from .tracking_v5_patch import install as _install_tracking_v5_patch
@@ -38,6 +39,9 @@ _install_ptz_safety_patch()
 # V5 owns persistent track lifecycle, temporal body evidence, trusted galleries,
 # live scene access and manual-review provenance. Spatial rules observe it after.
 _install_tracking_v5_patch()
+# Upgrade the old manual guard to recognize every manual provenance variant and
+# the new identity_origin column before any reindex/worker synchronization.
+_install_manual_integrity_v5_patch()
 # BodyIdentity's legacy label synchronizer would otherwise collapse
 # face_verified_trusted back to face_verified after each poll/restart.
 _install_body_trust_sync_patch()
@@ -70,6 +74,7 @@ del _install_face_refinement_patch
 del _install_identity_diagnostics_patch
 del _install_identity_manual_guard_patch
 del _install_identity_safety_patch
+del _install_manual_integrity_v5_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
 del _install_tracking_v5_patch
