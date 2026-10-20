@@ -1,34 +1,36 @@
 # PersonOfInterest
 
-PersonOfInterest é um NVR local-first para câmeras IP com visão computacional, tracking persistente, identificação facial/corporal, PTZ, alertas, Web Push e o assistente local Tonho.
+PersonOfInterest é um NVR **local-first** para câmeras IP com visão computacional, tracking persistente, Face/Body ReID, PTZ, alertas, Web Push, gravação e o assistente local Tonho.
 
-O projeto foi desenhado para manter câmera, embeddings, histórico, credenciais e regras no computador do usuário. A exposição remota recomendada é via **Tailscale**, sem publicar diretamente o servidor na internet.
+Câmeras, credenciais, embeddings, histórico, vídeos e regras permanecem no computador do usuário. Para acesso remoto, a recomendação é **Tailscale Serve**, sem publicar diretamente o servidor na internet.
 
-> Estado atual: desenvolvimento V5 em validação real. O fluxo principal do projeto continua sendo instalação por Git + `setup.ps1`/`start.ps1`. O empacotamento PyInstaller existe para gerar executáveis de distribuição, mas deve ser validado no sistema operacional alvo antes de uma release pública.
+> **Estado atual:** V5 em validação real. O fluxo principal continua sendo Git + `setup.ps1`/`start.ps1`. Os builds PyInstaller para Windows/Linux existem, mas devem ser testados no sistema operacional alvo antes de uma release pública.
 
 ---
 
 ## Principais recursos
 
-- FastAPI + SQLite
-- go2rtc para restream local, WebRTC/MSE e talkback
-- descoberta e cadastro de câmeras RTSP/ONVIF
-- YOLOX-Tiny ONNX para detecção de pessoas
-- tracking persistente com reassociação após oclusões curtas
-- PTZ manual, Home e auto-follow com suavização/predição
-- YuNet + SFace para Face ReID
-- OSNet para Body ReID temporal, sempre tratado como evidência provável
-- galeria de referências confiáveis, quarentena e desativadas
-- hard-negatives para falsos positivos recorrentes
-- Timeline com filtros e curadoria manual
-- regras de alerta por pessoa/câmera/horário e regras espaciais
-- Web Push
-- campainha manual e acionada por alertas espaciais
-- Tonho com wake word, conversa, TTS, comandos locais e pesquisa web
-- PWA instalável em Android, iOS/iPadOS e navegadores desktop compatíveis
-- suporte recomendado a acesso remoto por Tailscale Serve
-
-Todos os dados locais sensíveis ficam fora do Git, em `data/` na instalação por código-fonte.
+- FastAPI + SQLite;
+- go2rtc para restream local, WebRTC/MSE e talkback;
+- descoberta e cadastro RTSP/ONVIF;
+- YOLOX-Tiny para detecção de pessoas;
+- tracking persistente com reassociação após oclusões curtas;
+- PTZ manual, Home e auto-follow preditivo;
+- YuNet + SFace para Face ReID;
+- OSNet para Body ReID temporal, sempre como evidência provável;
+- Biblioteca de Pessoas com referências confiáveis, quarentena e desativadas;
+- memória persistente de falsos positivos por câmera;
+- Timeline com filtros, incluindo visão separada de falsos positivos;
+- retenção configurável de Timeline, imagens e referências automáticas;
+- gravação contínua ou por evento, isolada do motor de visão;
+- limites de retenção e espaço em disco;
+- regras de alerta por pessoa/câmera/horário e regras espaciais;
+- Web Push com pausa por dispositivo;
+- campainha manual/espacial e comando de chegada pelo Tonho;
+- Tonho com wake word, TTS, comandos locais e pesquisa web;
+- PWA instalável em Android, iOS/iPadOS e desktop;
+- autostart opcional do servidor no Windows;
+- builds one-folder para Windows e Linux.
 
 ---
 
@@ -36,170 +38,20 @@ Todos os dados locais sensíveis ficam fora do Git, em `data/` na instalação p
 
 ## Requisitos
 
-- Windows 10/11
-- Python 3.11+
-- Git
-- acesso à internet na primeira instalação para dependências/modelos
-
-Clone o repositório:
+- Windows 10/11;
+- Python 3.11+;
+- Git;
+- internet na primeira instalação para dependências/modelos.
 
 ```powershell
 git clone https://github.com/MicamAmorim/PersonOfInterest.git
 cd PersonOfInterest
-```
-
-Execute o setup:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-O setup:
+O setup cria `.venv`, instala dependências, baixa go2rtc quando necessário, prepara `data/` e pergunta se o servidor deve iniciar automaticamente com o Windows.
 
-1. cria `.venv`;
-2. instala as dependências Python;
-3. baixa `go2rtc.exe` se necessário;
-4. prepara `data/`;
-5. pergunta opcionalmente se este computador deve iniciar o servidor automaticamente com o Windows.
-
-Ao final, caso o autostart não tenha sido habilitado, inicie manualmente:
-
-```powershell
-.\start.ps1
-```
-
-Interface local:
-
-```text
-http://localhost:8080
-```
-
-## Setup não interativo quanto ao autostart
-
-Para já habilitar o servidor automático:
-
-```powershell
-.\setup.ps1 -ServerAutostart Enable
-```
-
-Para instalar sem perguntar sobre autostart:
-
-```powershell
-.\setup.ps1 -ServerAutostart Disable
-```
-
----
-
-# 2. Atualizar uma instalação existente
-
-```powershell
-git fetch origin
-git pull
-```
-
-Depois reinicie o servidor normalmente.
-
-Se o ambiente já está completamente instalado e você quer apenas ativar inicialização automática, não precisa rodar o setup novamente:
-
-```powershell
-.\install-server-autostart.ps1
-```
-
-Esse é o fluxo recomendado para uma instalação já funcional.
-
----
-
-# 3. Servidor automático no Windows
-
-O PersonOfInterest pode iniciar em segundo plano quando o usuário entra no Windows.
-
-A implementação usa o **Agendador de Tarefas do Windows** e não substitui o motor do projeto por um serviço separado. A tarefa simplesmente executa o mesmo `start.ps1` já usado manualmente, com `-NoBrowser`.
-
-## Ativar
-
-```powershell
-.\install-server-autostart.ps1
-```
-
-O script registra a tarefa:
-
-```text
-PersonOfInterest Server
-```
-
-Ela executa:
-
-```powershell
-start.ps1 -NoBrowser
-```
-
-O instalador tenta iniciar a tarefa imediatamente. Para apenas registrar e deixar a primeira execução para o próximo logon:
-
-```powershell
-.\install-server-autostart.ps1 -NoStart
-```
-
-## Comportamento
-
-Ao entrar no Windows:
-
-```text
-Windows login
-    ↓
-Task Scheduler
-    ↓
-server-autostart-runner.ps1
-    ↓
-/api/health já responde?
-    ├─ sim → não cria segunda instância
-    └─ não → start.ps1 -NoBrowser
-                 ↓
-            go2rtc + FastAPI + visão + Tonho
-```
-
-A tarefa:
-
-- roda somente para o usuário que a instalou;
-- não abre navegador;
-- ignora uma segunda execução simultânea;
-- tenta reiniciar até 3 vezes se o processo falhar;
-- permite execução em notebook usando bateria;
-- não exige que você mantenha um PowerShell aberto.
-
-## Logs do autostart
-
-```text
-data/logs/server-autostart.log
-```
-
-Para acompanhar pelo PowerShell:
-
-```powershell
-Get-Content .\data\logs\server-autostart.log -Wait
-```
-
-## Verificar a tarefa
-
-```powershell
-Get-ScheduledTask -TaskName "PersonOfInterest Server"
-Get-ScheduledTaskInfo -TaskName "PersonOfInterest Server"
-```
-
-## Remover
-
-```powershell
-.\remove-server-autostart.ps1
-```
-
-A remoção exclui apenas a inicialização automática. Ela **não encerra** uma instância que já esteja rodando naquele momento.
-
-> Por que no logon e não como serviço de sistema? Neste estágio isso evita credenciais administrativas, mantém acesso natural ao perfil/cache do usuário e reutiliza exatamente o mesmo caminho de inicialização que já é usado e testado manualmente. Um serviço nativo do Windows pode ser criado futuramente para instalações sem sessão de usuário.
-
----
-
-# 4. Inicialização manual
-
-Com navegador:
+Início manual:
 
 ```powershell
 .\start.ps1
@@ -211,30 +63,304 @@ Somente servidor:
 .\start.ps1 -NoBrowser
 ```
 
-`start.ps1` também verifica dependências e garante os modelos ONNX locais necessários.
+Interface local:
 
-Modelos principais:
+```text
+http://localhost:8080
+```
 
-- `yolox_tiny.onnx`
-- `face_detection_yunet_2023mar.onnx`
-- `face_recognition_sface_2021dec.onnx`
-- `osnet_x0_25_msmt17.onnx`
-
-Os modelos Whisper são baixados pelo `faster-whisper` apenas quando o usuário seleciona um modelo que ainda não existe no cache local.
+A dependência `imageio-ffmpeg` fornece um FFmpeg utilizável pelo gravador quando não existe `ffmpeg` no PATH. Também é possível definir `FFMPEG_PATH` manualmente.
 
 ---
 
-# 5. Tailscale e acesso remoto
+# 2. Atualizar uma instalação existente
 
-O uso recomendado é manter o PersonOfInterest privado dentro da sua tailnet.
+```powershell
+git fetch origin
+git pull
+```
 
-Com o servidor em execução:
+Depois reinicie o servidor. Migrações novas são aditivas e executadas na inicialização.
+
+Para ativar autostart em uma instalação já funcional:
+
+```powershell
+.\install-server-autostart.ps1
+```
+
+---
+
+# 3. Autostart do servidor — Windows
+
+Ativar:
+
+```powershell
+.\install-server-autostart.ps1
+```
+
+A tarefa `PersonOfInterest Server` executa:
+
+```powershell
+start.ps1 -NoBrowser
+```
+
+no logon do usuário. Antes de iniciar outra instância, o runner consulta `/api/health`.
+
+Verificar:
+
+```powershell
+Get-ScheduledTask -TaskName "PersonOfInterest Server"
+Get-ScheduledTaskInfo -TaskName "PersonOfInterest Server"
+```
+
+Log:
+
+```text
+data/logs/server-autostart.log
+```
+
+Remover:
+
+```powershell
+.\remove-server-autostart.ps1
+```
+
+Setup sem pergunta:
+
+```powershell
+.\setup.ps1 -ServerAutostart Enable
+.\setup.ps1 -ServerAutostart Disable
+```
+
+---
+
+# 4. Gerenciamento de armazenamento
+
+A tela **Sistema → Gerenciamento da base** exibe uso da Timeline, gravações, referências e disco livre.
+
+## Defaults seguros
+
+A retenção destrutiva da Timeline vem **desativada por padrão**. A gravação de todas as câmeras também vem **desativada por padrão**.
+
+Defaults iniciais:
+
+```text
+Retenção automática da Timeline: desativada
+Timeline:                        30 dias
+Máximo Timeline:                 10 GB
+Faces automáticas / pessoa:      30
+Bodies automáticos / pessoa:     50
+Proteger referências manuais:    sim
+Intervalo de limpeza:            15 min
+
+Protótipos FP / câmera:           100
+Exemplos / protótipo FP:         5
+
+Retenção de vídeos:              30 dias
+Máximo de vídeos:                500 GB
+Reserva livre do sistema:        10 GB
+```
+
+Todos esses valores podem ser alterados pela interface.
+
+### Unidades de tempo
+
+Retenção da Timeline e dos vídeos aceita minutos, horas, dias, semanas ou meses. Para o cálculo interno de retenção, `1 mês = 30 dias`.
+
+A duração da gravação por evento aceita segundos, minutos, horas ou dias. A duração dos segmentos contínuos aceita minutos, horas ou dias.
+
+## Como a limpeza funciona
+
+Quando **Ativar retenção automática da Timeline** está marcado, o `StorageManager` pode:
+
+1. remover eventos além da retenção configurada;
+2. remover os eventos mais antigos se `events/ + faces/` ultrapassarem o limite da Timeline;
+3. limitar referências automáticas de face/corpo por pessoa;
+4. preservar referências/eventos manuais quando **Proteger referências manuais** estiver ligado;
+5. remover snapshots/crops físicos vinculados aos eventos podados;
+6. remover clusters desconhecidos que ficaram completamente órfãos.
+
+A memória persistente de falsos positivos é independente da Timeline e não some quando o evento original expira.
+
+## Limpeza manual
+
+A interface oferece **Executar limpeza agora**, respeitando as políticas configuradas.
+
+## Compactar o SQLite
+
+Excluir linhas do SQLite não reduz necessariamente `person_of_interest.db` imediatamente. A tela oferece **Compactar banco**, executando checkpoint + `VACUUM` apenas sob comando explícito.
+
+`VACUUM` nunca roda automaticamente em background. Se o banco estiver ocupado por outra escrita, a operação é cancelada e pode ser repetida depois, em vez de interferir no motor.
+
+---
+
+# 5. Memória persistente de falsos positivos
+
+O sistema mantém os hard-negatives legados e adiciona protótipos persistentes, limitados e independentes da Timeline.
+
+Quando o usuário marca manualmente uma detecção como falso positivo:
+
+```text
+evento marcado manualmente
+        ↓
+Body embedding + câmera + geometria
+        ↓
+protótipo negativo persistente
+        ↓
+propagação retroativa conservadora
+        ↓
+futuros matches fortes → false_positive
+        ↓
+sem Push
+```
+
+A propagação é conservadora. Ela considera aparência, câmera e, quando necessário, coerência espacial do bounding box. Eventos com identidade manual ou evidência facial útil não são indiscriminadamente transformados em falsos positivos.
+
+### Proteção contra drift
+
+Somente exemplos revisados manualmente atualizam o centróide do protótipo. Ocorrências automaticamente suprimidas **não treinam o protótipo**, evitando auto-reforço incorreto.
+
+### Support
+
+Um protótipo com várias confirmações manuais fornece suporte repetido ao ranker de hard-negatives, limitado a três votos. Nenhum threshold positivo do Body ReID é reduzido.
+
+### Timeline separada
+
+A Timeline passa a oferecer:
+
+```text
+Exibição
+- Eventos normais
+- Falsos positivos
+- Todos
+```
+
+O modo normal exclui `identity_state = false_positive`.
+
+### Desaprender
+
+Em **Sistema → Falsos positivos aprendidos** é possível desativar um protótipo. A ação também retira do matcher os `body_negative_samples` legados correspondentes aos exemplos daquele protótipo. Portanto **Desaprender** não é apenas visual.
+
+Reativar volta a utilizar o protótipo persistente.
+
+### Consolidar históricos
+
+O botão **Consolidar falsos positivos atuais** transforma falsos positivos manuais históricos em protótipos persistentes e reaplica somente correspondências retroativas muito fortes.
+
+Arquivos de auditoria:
+
+```text
+data/false_positive_prototypes/
+```
+
+Embeddings/centróides ficam no SQLite; a imagem representativa serve apenas para auditoria visual.
+
+---
+
+# 6. Gravação NVR
+
+A gravação é separada do detector/tracker/ReID:
+
+```text
+câmera RTSP
+    ↓
+  go2rtc
+  ↙    ↘
+visão   FFmpeg Recorder
+```
+
+O gravador lê o restream local do go2rtc e não usa frames processados pelo YOLO.
+
+Para reduzir CPU:
+
+- vídeo é mantido com `-c:v copy`;
+- áudio, quando presente, é convertido para AAC 96 kbps para compatibilidade MP4 com câmeras que fornecem PCMA/PCMU.
+
+## Modos por câmera
+
+Em **Sistema → Gravação por câmera**:
+
+```text
+Desativada
+Somente quando houver evento
+Contínua 24/7
+```
+
+### Desativada
+
+Default. Nenhum processo FFmpeg fica ativo para a câmera.
+
+### Somente quando houver evento
+
+Um novo evento inicia uma gravação pelo **Tempo após evento** configurado. Se outro evento ocorrer na mesma câmera enquanto a gravação ainda está ativa, o deadline é estendido.
+
+Exemplo:
+
+```text
+Tempo após evento = 60 s
+Evento 14:32:10 → grava aproximadamente até 14:33:10
+Novo evento 14:32:50 → estende até aproximadamente 14:33:50
+```
+
+A implementação atual **não oferece pré-roll anterior ao evento**.
+
+### Contínua 24/7
+
+FFmpeg grava continuamente e segmenta os arquivos de acordo com **Duração dos arquivos**. Segmentos são preferíveis a um arquivo único de dias/semanas porque reduzem risco de corrupção e permitem retenção progressiva.
+
+## Retenção de vídeo
+
+Três limites são considerados:
+
+1. idade máxima;
+2. espaço máximo reservado aos vídeos;
+3. espaço livre mínimo que deve permanecer no disco.
+
+A condição mais restritiva vence. Arquivos que parecem estar sendo escritos naquele momento não são elegíveis para remoção.
+
+Arquivos:
+
+```text
+data/recordings/
+└── camera_<id>/
+    └── YYYY/MM/DD/
+        ├── continuous_....mp4
+        └── event_....mp4
+```
+
+Logs:
+
+```text
+data/logs/recorder-camera-<id>.log
+```
+
+A interface mostra disponibilidade do FFmpeg, sessões ativas e erros por câmera.
+
+---
+
+# 7. Pausar notificações em um único aparelho
+
+Em **Alertas → Notificações**, `Pausar neste dispositivo` altera somente o endpoint Web Push daquele navegador/PWA.
+
+```text
+PC servidor       enabled = 0
+celular A          enabled = 1
+celular B          enabled = 1
+```
+
+A pausa não altera regras globais nem chama `PushSubscription.unsubscribe()`. Retomar reutiliza a mesma inscrição.
+
+---
+
+# 8. Tailscale e PWA
+
+Com o servidor rodando:
 
 ```powershell
 .\tailscale-serve.ps1
 ```
 
-Ver status:
+Status:
 
 ```powershell
 .\tailscale-serve.ps1 -Status
@@ -246,75 +372,33 @@ Desativar:
 .\tailscale-serve.ps1 -Off
 ```
 
-O script publica `localhost:8080` via HTTPS dentro da tailnet, normalmente em uma URL como:
+Use a URL HTTPS `*.ts.net` no celular. Evite Funnel/publicação pública para instalações privadas.
 
-```text
-https://nome-do-pc.alguma-tailnet.ts.net
-```
+### Android/Desktop
 
-Não use `localhost` no celular: no celular, `localhost` aponta para o próprio aparelho.
+Chrome/Edge podem oferecer **Instalar app**.
 
-Evite Tailscale Funnel/publicação pública para este tipo de instalação doméstica. Prefira Tailscale Serve + ACLs da tailnet.
+### iPhone/iPad
 
----
-
-# 6. PWA — instalar como aplicativo
-
-PersonOfInterest é uma **Progressive Web App (PWA)**.
-
-A PWA continua sendo um aplicativo web: ela não tem permissão para iniciar diretamente `start.ps1` ou executar processos do sistema operacional. Por isso, no computador servidor, o autostart do Windows é independente da PWA.
-
-## Android / Chrome / Edge
-
-Abra a URL HTTPS do Tailscale e use **Instalar app / Adicionar à tela inicial**. Quando o navegador expõe o prompt nativo, a própria interface do PersonOfInterest também pode oferecer o botão de instalação.
-
-## iPhone / iPad
-
-No Safari:
+Safari:
 
 ```text
 Compartilhar → Adicionar à Tela de Início
 ```
 
-Abra depois pelo ícone criado. Web Push no iOS deve ser configurado a partir do web app instalado quando suportado pela versão do sistema.
-
-## Desktop
-
-Chrome/Edge e outros navegadores compatíveis podem instalar a PWA. No computador que também é o servidor, use em conjunto com:
-
-```powershell
-.\install-server-autostart.ps1
-```
-
-Assim o backend sobe sozinho no login e o ícone da PWA funciona apenas como cliente/interface, que é a separação correta entre servidor e navegador.
+A PWA é cliente e não pode executar `start.ps1`. No PC servidor, combine-a com o autostart do Windows.
 
 ---
 
-# 7. Áudio e talkback
+# 9. Áudio e talkback
 
-Por padrão:
+O viewer começa sem permissão permanente de microfone. Ouvir áudio é explícito e falar usa push-to-talk. Ao soltar, a implementação encerra o caminho de talkback antes de restaurar a visualização.
 
-- o navegador não recebe permissão permanente de microfone no viewer;
-- ouvir a câmera é uma ação explícita;
-- falar com a câmera usa push-to-talk;
-- durante o push-to-talk a escuta local é suspensa;
-- ao soltar o botão, tracks de microfone, WebRTC e WebSocket de talkback são encerrados.
-
-Isso reduz loops acústicos e evita que áudio do PC/celular continue vazando para o alto-falante da câmera depois da fala.
-
-Talkback continua dependendo do firmware individual da câmera aceitar DVRIP/RTSP backchannel.
+Talkback depende do firmware da câmera aceitar DVRIP/RTSP backchannel.
 
 ---
 
-# 8. Compilar executável Windows
-
-O projeto inclui um build PyInstaller para gerar uma distribuição **one-folder**.
-
-Isso é intencional: modelos, bibliotecas nativas, frontend e go2rtc tornam um `--onefile` muito grande e obrigariam extração temporária em toda execução.
-
-## Build padrão
-
-No Windows:
+# 10. Build Windows
 
 ```powershell
 .\build-windows.ps1
@@ -326,48 +410,37 @@ Saída:
 dist/PersonOfInterest/PersonOfInterest.exe
 ```
 
-A pasta `dist/PersonOfInterest/` inteira faz parte da aplicação e deve ser distribuída junto com o `.exe`.
-
-O pacote inclui:
-
-- backend Python congelado pelo PyInstaller;
-- frontend/PWA;
-- dependências Python necessárias;
-- go2rtc para Windows.
-
-Por padrão os quatro modelos ONNX não são embutidos; eles são baixados uma única vez no primeiro uso do executável.
-
-## Build Windows com modelos ONNX embutidos
+Com modelos ONNX embutidos:
 
 ```powershell
 .\build-windows.ps1 -BundleModels
 ```
 
-Isso aumenta bastante o tamanho da distribuição, mas permite que os modelos principais de visão já façam parte do pacote.
+O build é **one-folder** e coleta também `imageio_ffmpeg` para o gravador.
 
-Os modelos Whisper **não** são empacotados, porque dependem da escolha por câmera/usuário e podem ser muito grandes. Eles continuam usando o cache normal do `faster-whisper`.
+Dados do executável:
+
+```text
+%LOCALAPPDATA%\PersonOfInterest\data
+```
+
+Pode ser substituído por `POI_DATA_DIR`.
 
 ---
 
-# 9. Compilar executável Linux
+# 11. Build Linux
 
-PyInstaller não faz cross-compile entre Windows e Linux neste fluxo. Para gerar o executável Linux, execute o build em um sistema Linux da mesma arquitetura desejada.
-
-Arquiteturas atualmente tratadas pelo script:
-
-- x86_64/amd64
-- arm64/aarch64
-
-Primeiro torne o script executável:
+PyInstaller não faz cross-compile Windows → Linux neste fluxo.
 
 ```bash
 chmod +x build-linux.sh
+./build-linux.sh
 ```
 
-Build padrão:
+Com modelos:
 
 ```bash
-./build-linux.sh
+./build-linux.sh --bundle-models
 ```
 
 Saída:
@@ -376,114 +449,43 @@ Saída:
 dist/PersonOfInterest/PersonOfInterest
 ```
 
-Com modelos ONNX incluídos:
-
-```bash
-./build-linux.sh --bundle-models
-```
-
-O script baixa o binário go2rtc adequado à arquitetura atual e usa um ambiente isolado `.build-venv-linux`.
-
----
-
-# 10. Arquitetura do pacote executável
-
-O build usa:
-
-```text
-packaging/launcher.py
-packaging/PersonOfInterest.spec
-packaging/requirements-build.txt
-```
-
-Fluxo do launcher empacotado:
-
-```text
-PersonOfInterest.exe / PersonOfInterest
-        ↓
-servidor já responde em :8080?
-        ├─ sim → abre a interface e não duplica o servidor
-        └─ não
-             ↓
-        garante modelos
-             ↓
-        inicia go2rtc
-             ↓
-        inicia FastAPI/uvicorn
-             ↓
-        abre navegador (exceto --no-browser)
-```
-
-Opções do executável:
-
-```text
---no-browser
---port 8080
-```
-
-## Dados persistentes do pacote
-
-Para não armazenar banco/credenciais dentro da pasta PyInstaller, a versão empacotada usa por padrão:
-
-Windows:
-
-```text
-%LOCALAPPDATA%\PersonOfInterest\data
-```
-
-Linux:
+Dados persistentes:
 
 ```text
 $XDG_DATA_HOME/personofinterest/data
 ```
 
-ou, quando `XDG_DATA_HOME` não está definido:
+ou:
 
 ```text
 ~/.local/share/personofinterest/data
 ```
 
-É possível substituir o local explicitamente:
-
-Windows:
-
-```powershell
-$env:POI_DATA_DIR = "D:\PersonOfInterestData"
-.\PersonOfInterest.exe
-```
-
-Linux:
-
-```bash
-POI_DATA_DIR=/srv/personofinterest/data ./PersonOfInterest
-```
-
-## SearXNG no pacote
-
-O executável não embute Docker/SearXNG. Caso `SEARXNG_URL` esteja configurado no ambiente, Tonho pode continuar usando o serviço externo/local correspondente. Caso contrário, os fallbacks gratuitos existentes permanecem disponíveis.
-
 ---
 
-# 11. Estrutura dos dados na instalação por Git
+# 12. Dados locais
+
+Instalação por Git:
 
 ```text
 data/
 ├── person_of_interest.db
 ├── events/
 ├── faces/
+├── body_anchors/
+├── false_positive_prototypes/
+├── recordings/
 ├── models/
 ├── assistant_audio/
 ├── vapid/
 └── logs/
 ```
 
-Esses dados são ignorados pelo Git.
-
-Nunca publique `data/` em um repositório público: ele pode conter credenciais de câmera, dados biométricos, histórico e material de Web Push.
+`data/` é ignorado pelo Git. Não publique essa pasta: ela pode conter credenciais, biometria, histórico, vídeos e material de Web Push.
 
 ---
 
-# 12. Portas locais
+# 13. Portas
 
 ```text
 8080/tcp       API + frontend/PWA + WebSocket proxy
@@ -492,70 +494,69 @@ Nunca publique `data/` em um repositório público: ele pode conter credenciais 
 8555/tcp+udp   WebRTC media transport
 ```
 
-Com Tailscale Serve, o navegador usa HTTPS pela URL `*.ts.net` enquanto o backend continua local.
-
 ---
 
-# 13. Desenvolvimento e validação
+# 14. Validação
 
-Compilar sintaxe do backend:
+Sintaxe:
 
 ```powershell
 .\.venv\Scripts\python.exe -m compileall backend\app
 ```
 
-Executar testes:
+Testes:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-No Linux, use o Python da venv correspondente.
+Testes unitários/estáticos não substituem validação no hardware real.
 
-Para mudanças envolvendo câmera, PTZ, talkback, WebRTC, Face/Body ReID e wake word, testes unitários não substituem validação no hardware real.
+## Checklist de gravação
+
+1. `Desativada` → nenhum FFmpeg da câmera;
+2. `Somente evento` → evento cria MP4 e encerra no prazo;
+3. eventos próximos estendem a sessão;
+4. `Contínua` → segmentos são criados no intervalo configurado;
+5. áudio/vídeo abrem corretamente;
+6. retenção remove apenas arquivos elegíveis e não o segmento ativo;
+7. reiniciar o sistema não grava eventos históricos.
+
+## Checklist de falso positivo
+
+1. marque manualmente um objeto recorrente;
+2. confirme que aparece em **Falsos positivos aprendidos**;
+3. confirme que futuras ocorrências fortes não geram Push;
+4. confirme que a Timeline normal não as mostra;
+5. use o filtro **Falsos positivos** para auditoria;
+6. use **Desaprender** e confirme que novas detecções deixam de ser suprimidas por aquele protótipo.
 
 ---
 
-# 14. Build vs. instalador
+# 15. Segurança e checkpoint desta reforma
 
-Os scripts `build-windows.ps1` e `build-linux.sh` geram executáveis/distribuições, mas **não são ainda um instalador gráfico**.
-
-Hoje existem três fluxos diferentes:
+Antes da reforma de armazenamento/gravação foi criado:
 
 ```text
-Desenvolvimento / Git
-    → setup.ps1 + start.ps1
-
-Servidor Windows permanente via Git
-    → install-server-autostart.ps1
-
-Distribuição compilada
-    → build-windows.ps1 / build-linux.sh
+backup/v5.7-before-storage-fp-recording-2026-10-20
 ```
 
-Um futuro `PersonOfInterest-Setup.exe` poderá reutilizar essas mesmas rotinas para:
-
-- escolher Cliente ou Servidor;
-- copiar o build compilado;
-- criar atalhos;
-- registrar autostart;
-- configurar Tailscale;
-- instalar/desinstalar de forma tradicional.
-
-A lógica de servidor automático foi separada justamente para que esse futuro instalador possa reaproveitá-la sem reescrever o motor do projeto.
+Esse branch protege o **código** imediatamente anterior à reforma. Ele não substitui backup da pasta `data/`, pois banco, imagens e vídeos são deliberadamente ignorados pelo Git.
 
 ---
 
-# 15. Privacidade e segurança
+# 16. Princípios de arquitetura
 
-Face embeddings e amostras corporais são identificadores biométricos/sensíveis. Recomendações:
+As novas camadas seguem estes invariantes:
 
-- mantenha `data/` privado;
-- use senhas fortes nas câmeras;
-- não exponha RTSP/go2rtc diretamente à internet;
-- use Tailscale ACLs;
-- proteja backups do SQLite e das imagens;
-- revise quem tem acesso à tailnet;
-- não versiona `.env`, banco, VAPID privado ou credenciais.
-
-PersonOfInterest foi desenhado para execução local; manter essa fronteira reduz significativamente a superfície de exposição.
+- gravação não controla tracker ou ReID;
+- retenção atua depois da produção dos dados;
+- limpeza destrutiva da Timeline é opt-in;
+- gravação é `off` por padrão;
+- referências manuais são protegidas por padrão;
+- falsos positivos automáticos não treinam novos protótipos sozinhos;
+- memória negativa persiste mesmo se a Timeline original for apagada;
+- banco só é compactado por ação explícita;
+- falha de gravação/armazenamento não deve impedir o motor principal de iniciar;
+- Face ReID continua sendo a evidência forte;
+- esta reforma não reduz thresholds positivos do Body ReID.
