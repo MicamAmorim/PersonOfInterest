@@ -46,8 +46,8 @@ def install() -> None:
     original_undo_false_positive = cls.undo_false_positive
 
     def negative_gallery(self: Any, camera_id: int) -> list[dict[str, Any]]:
-        # Keep legacy reviewed negatives for backward compatibility, then append
-        # bounded persistent prototypes that survive Timeline retention.
+        # Legacy entries remain a migration fallback for historical installations.
+        # New reviewed negatives are distilled into bounded persistent prototypes.
         legacy = original_negative_gallery(self, camera_id)
         try:
             persistent = _expand_persistent_support(memory.negative_gallery(int(camera_id)))
@@ -57,11 +57,16 @@ def install() -> None:
         return [*legacy, *persistent]
 
     def record_false_positive(self: Any, event_id: int) -> None:
-        # Preserve the proven legacy write path first. The persistent layer is
-        # additive and failure-isolated so manual review can never break ReID.
+        # Preserve the proven legacy write path first so review is never lost if
+        # prototype creation fails. Once persistent learning succeeds, the legacy
+        # body_negative_samples row is redundant and is removed, bounding growth.
         original_record_false_positive(self, event_id)
         try:
-            memory.learn_event(int(event_id), propagate=True, body_manager=self)
+            result = memory.learn_event(int(event_id), propagate=True, body_manager=self)
+            if result.get("learned"):
+                with connection() as conn:
+                    conn.execute("DELETE FROM body_negative_samples WHERE event_id = ?", (int(event_id),))
+                    conn.commit()
         except Exception as exc:
             self.error = f"Memória persistente de falso positivo: {exc}"
 
