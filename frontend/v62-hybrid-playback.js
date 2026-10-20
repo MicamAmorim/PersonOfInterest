@@ -40,16 +40,10 @@
   function setPlaying(value) {
     H.playing = Boolean(value);
     const play = document.getElementById('poiHybridPlay');
-    const center = document.getElementById('poiHybridCenterPlay');
     if (play) {
       play.textContent = H.playing ? '❚❚' : '▶';
       play.title = H.playing ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)';
       play.setAttribute('aria-label', play.title);
-    }
-    if (center) {
-      center.textContent = H.playing ? '❚❚' : '▶';
-      center.classList.toggle('playing', H.playing);
-      center.setAttribute('aria-label', H.playing ? 'Pausar Timeline' : 'Reproduzir Timeline');
     }
     const status = document.getElementById('poiHybridStatus');
     if (status) status.textContent = H.playing ? 'Reproduzindo sequência temporal' : 'Pausado';
@@ -85,7 +79,9 @@
   }
 
   function playableRecordings() {
-    return (H.data?.recordings || []).filter(rec => rec.file_url && Number(rec.end_second) > Number(rec.start_second));
+    return (H.data?.recordings || [])
+      .filter(rec => rec.file_url && Number(rec.end_second) > Number(rec.start_second))
+      .sort((a, b) => Number(a.start_second) - Number(b.start_second));
   }
 
   function recordingAt(second, preferredEventId = null) {
@@ -98,14 +94,19 @@
   }
 
   function eventAt(second, tolerance = 15) {
-    const events = visibleEvents();
     let best = null;
     let delta = Infinity;
-    for (const event of events) {
+    for (const event of visibleEvents()) {
       const d = Math.abs(Number(event.second || 0) - second);
       if (d < delta) { best = event; delta = d; }
     }
     return delta <= tolerance ? best : null;
+  }
+
+  function selectedEventNear(second, tolerance = 15) {
+    if (!H.selectedEventId) return null;
+    const event = visibleEvents().find(item => Number(item.id) === Number(H.selectedEventId));
+    return event && Math.abs(Number(event.second || 0) - second) <= tolerance ? event : null;
   }
 
   function mediaItems() {
@@ -130,12 +131,12 @@
   }
 
   function nextMedia(afterSecond, inclusive = false) {
-    const eps = inclusive ? 0 : .05;
-    return mediaItems().find(item => item.end >= afterSecond + eps && (item.start >= afterSecond + eps || (item.type === 'video' && item.start <= afterSecond && item.end > afterSecond + eps))) || null;
+    const threshold = Number(afterSecond) + (inclusive ? 0 : .05);
+    return mediaItems().find(item => item.start >= threshold || (item.type === 'video' && item.start <= threshold && item.end > threshold)) || null;
   }
 
   function previousMedia(beforeSecond) {
-    const items = mediaItems().filter(item => item.start < beforeSecond - .05);
+    const items = mediaItems().filter(item => item.start < Number(beforeSecond) - .05);
     return items.length ? items[items.length - 1] : null;
   }
 
@@ -185,13 +186,15 @@
   function waitAndPlayVideo() {
     const video = document.getElementById('poiTimelineVideo');
     if (!video || video.hidden) return false;
-    video.playbackRate = playbackRate();
     const attempt = () => {
       if (!H.playing || video.hidden) return;
       video.playbackRate = playbackRate();
       video.play().catch(() => {
         video.addEventListener('canplay', () => {
-          if (H.playing && !video.hidden) video.play().catch(() => {});
+          if (H.playing && !video.hidden) {
+            video.playbackRate = playbackRate();
+            video.play().catch(() => {});
+          }
         }, { once: true });
       });
     };
@@ -203,7 +206,7 @@
     clearSlideTimer();
     if (!H.playing) return;
     const duration = Math.max(600, 2200 / playbackRate());
-    H.slideTimer = setTimeout(() => advanceAfter(second), duration);
+    H.slideTimer = setTimeout(() => advanceAfter(Number(second) + .1), duration);
   }
 
   async function showItem(item, offsetSecond = null) {
@@ -211,12 +214,10 @@
     const target = offsetSecond != null ? Number(offsetSecond) : Number(item.start || 0);
     if (item.eventId) syncSelectedEvent(item.eventId, true);
     dispatchSeek(target);
-    await new Promise(resolve => setTimeout(resolve, 90));
+    await new Promise(resolve => setTimeout(resolve, 100));
     if (!H.playing) return;
     if (item.type === 'video') {
-      if (!waitAndPlayVideo()) {
-        setTimeout(() => { if (H.playing) waitAndPlayVideo(); }, 220);
-      }
+      if (!waitAndPlayVideo()) setTimeout(() => { if (H.playing) waitAndPlayVideo(); }, 240);
     } else {
       scheduleSnapshotAdvance(target);
     }
@@ -228,13 +229,16 @@
     if (!H.data) return;
     setPlaying(true);
     const second = currentSecond();
-    const selectedId = H.selectedEventId || Number(document.querySelector('#poiEventStrip .poi-event-card.selected')?.dataset.eventCard || 0) || null;
-    const rec = recordingAt(second, selectedId);
+    const selected = selectedEventNear(second, 15);
+    const rec = recordingAt(second, selected?.id || null);
     if (rec) {
-      await showItem({ type: 'video', start: Number(rec.start_second), end: Number(rec.end_second), recording: rec, eventId: rec.source_event_id || selectedId }, second);
+      await showItem({
+        type: 'video', start: Number(rec.start_second), end: Number(rec.end_second), recording: rec,
+        eventId: rec.source_event_id ? Number(rec.source_event_id) : (selected?.id || null),
+      }, second);
       return;
     }
-    const event = selectedId ? visibleEvents().find(item => Number(item.id) === Number(selectedId)) : eventAt(second, 15);
+    const event = selected || eventAt(second, 15);
     if (event?.snapshot_url && !recordingAt(Number(event.second || 0), event.id)) {
       await showItem({ type: 'snapshot', start: Number(event.second), end: Number(event.second), event, eventId: Number(event.id) }, Number(event.second));
       return;
@@ -261,7 +265,7 @@
   async function advanceAfter(second) {
     if (!H.playing) return;
     await loadDayData(false);
-    const next = nextMedia(Number(second) + .05, false);
+    const next = nextMedia(Number(second), false);
     if (next) await showItem(next, next.start);
     else pauseSequence();
   }
@@ -269,10 +273,12 @@
   async function seekRelative(delta) {
     await loadDayData(false);
     const target = Math.max(0, currentSecond() + Number(delta || 0));
+    H.selectedEventId = null;
+    H.lastHighlightedId = null;
     dispatchSeek(target);
     const event = eventAt(target, 2);
     if (event) syncSelectedEvent(event.id, true);
-    if (H.playing) setTimeout(playFromNeedle, 100);
+    if (H.playing) setTimeout(playFromNeedle, 110);
   }
 
   async function jumpMedia(direction) {
@@ -282,32 +288,23 @@
     if (!item) return;
     dispatchSeek(item.start);
     if (item.eventId) syncSelectedEvent(item.eventId, true);
-    if (H.playing) setTimeout(playFromNeedle, 100);
+    else H.selectedEventId = null;
+    if (H.playing) setTimeout(playFromNeedle, 110);
   }
 
   function installControls() {
     const stage = document.getElementById('poiTimelineStage');
     if (!stage || document.getElementById('poiHybridControls')) return false;
-
-    const center = document.createElement('button');
-    center.id = 'poiHybridCenterPlay';
-    center.type = 'button';
-    center.className = 'poi-hybrid-center-play';
-    center.textContent = '▶';
-    center.setAttribute('aria-label', 'Reproduzir Timeline');
-    center.addEventListener('click', event => { event.stopPropagation(); togglePlayback(); });
-    stage.appendChild(center);
-
     const controls = document.createElement('div');
     controls.id = 'poiHybridControls';
     controls.className = 'poi-hybrid-controls';
     controls.innerHTML = `
       <div class="poi-hybrid-buttons">
-        <button type="button" id="poiHybridPrev" title="Mídia anterior">⏮</button>
-        <button type="button" id="poiHybridBack" title="Voltar 10 segundos">↶ <span>10</span></button>
-        <button type="button" id="poiHybridPlay" class="primary" title="Reproduzir (Espaço)">▶</button>
-        <button type="button" id="poiHybridForward" title="Avançar 10 segundos"><span>10</span> ↷</button>
-        <button type="button" id="poiHybridNext" title="Próxima mídia">⏭</button>
+        <button type="button" id="poiHybridPrev" title="Mídia anterior" aria-label="Mídia anterior">⏮</button>
+        <button type="button" id="poiHybridBack" title="Voltar 10 segundos" aria-label="Voltar 10 segundos">↶ <span>10</span></button>
+        <button type="button" id="poiHybridPlay" class="primary" title="Reproduzir (Espaço)" aria-label="Reproduzir (Espaço)">▶</button>
+        <button type="button" id="poiHybridForward" title="Avançar 10 segundos" aria-label="Avançar 10 segundos"><span>10</span> ↷</button>
+        <button type="button" id="poiHybridNext" title="Próxima mídia" aria-label="Próxima mídia">⏭</button>
       </div>
       <div class="poi-hybrid-meta"><span id="poiHybridStatus">Pausado</span><label>Velocidade <select id="poiHybridSpeed"><option value="0.5">0,5×</option><option value="1" selected>1×</option><option value="1.5">1,5×</option><option value="2">2×</option></select></label></div>`;
     stage.insertAdjacentElement('afterend', controls);
@@ -321,7 +318,8 @@
       H.speed = Number(event.target.value) || 1;
       const video = document.getElementById('poiTimelineVideo');
       if (video) video.playbackRate = playbackRate();
-      if (H.playing && !document.getElementById('poiTimelineSnapshot')?.hidden) scheduleSnapshotAdvance(currentSecond());
+      const snapshot = document.getElementById('poiTimelineSnapshot');
+      if (H.playing && snapshot && !snapshot.hidden) scheduleSnapshotAdvance(currentSecond());
     });
     return true;
   }
@@ -338,20 +336,20 @@
       if (!H.transitioning && !video.ended && H.playing) setPlaying(false);
     });
     video.addEventListener('timeupdate', () => {
-      if (!H.playing) return;
-      syncEventNearNeedle(currentSecond(), false);
+      if (H.playing) syncEventNearNeedle(currentSecond(), false);
     });
     video.addEventListener('ended', () => {
       if (!H.playing) return;
-      const second = currentSecond();
-      const rec = recordingAt(second);
-      const records = playableRecordings().filter(item => item.mode === 'continuous');
+      const recId = Number(video.dataset.recordingId || 0);
+      const rec = playableRecordings().find(item => Number(item.id) === recId) || recordingAt(currentSecond());
       if (rec?.mode === 'continuous') {
+        const records = playableRecordings().filter(item => item.mode === 'continuous');
         const idx = records.findIndex(item => Number(item.id) === Number(rec.id));
         const next = idx >= 0 ? records[idx + 1] : null;
-        if (next && Number(next.start_second) - Number(rec.end_second) <= 120) return; // V60 already chains adjacent segments.
+        if (next && Number(next.start_second) - Number(rec.end_second) <= 120) return;
       }
-      setTimeout(() => advanceAfter(second), 120);
+      const after = rec ? Number(rec.end_second) + .1 : currentSecond() + .1;
+      setTimeout(() => advanceAfter(after), 120);
     });
   }
 
@@ -372,7 +370,7 @@
         setTimeout(() => {
           setPlaying(true);
           playFromNeedle();
-        }, 100);
+        }, 110);
       }, 0);
     });
 
@@ -380,6 +378,7 @@
     scrubber?.addEventListener('input', () => {
       if (!H.transitioning) {
         clearSlideTimer();
+        H.selectedEventId = null;
         syncEventNearNeedle(currentSecond(), false);
       }
     });
@@ -394,11 +393,11 @@
         H.key = '';
         H.selectedEventId = null;
         H.lastHighlightedId = null;
-        setTimeout(() => loadDayData(true), 200);
+        setTimeout(() => loadDayData(true), 220);
       });
     });
-    document.getElementById('poiTimelineRefresh')?.addEventListener('click', () => setTimeout(() => loadDayData(true), 120));
-    document.getElementById('poiTimelineShowFp')?.addEventListener('change', () => setTimeout(() => loadDayData(true), 120));
+    document.getElementById('poiTimelineRefresh')?.addEventListener('click', () => setTimeout(() => loadDayData(true), 140));
+    document.getElementById('poiTimelineShowFp')?.addEventListener('change', () => setTimeout(() => loadDayData(true), 140));
 
     document.addEventListener('keydown', event => {
       if (event.code !== 'Space' || event.repeat || !timelineActive()) return;
@@ -411,10 +410,18 @@
     });
   }
 
+  function personsFromState() {
+    try {
+      return typeof state !== 'undefined' && Array.isArray(state.persons) ? state.persons : [];
+    } catch (_) { return []; }
+  }
+
   function installPersonPicker() {
     const dialog = document.getElementById('poiTimelineClassifyDialog');
     const identify = document.getElementById('poiClassifyIdentify');
     if (!dialog || !identify || document.getElementById('poiClassifyPersonPicker')) return false;
+    const actions = dialog.querySelector('.poi-classify-actions');
+    const cancel = document.getElementById('poiClassifyCancel');
     const picker = document.createElement('div');
     picker.id = 'poiClassifyPersonPicker';
     picker.className = 'poi-classify-person-picker';
@@ -424,22 +431,31 @@
       <label>Pessoa<select id="poiClassifyPersonSelect"><option value="">Carregando…</option></select></label>
       <label id="poiClassifyNewNameLabel" hidden>Novo nome<input id="poiClassifyNewName" maxlength="120" autocomplete="off" placeholder="Nome da pessoa"></label>
       <div class="poi-person-picker-actions"><button type="button" class="button ghost" id="poiClassifyPersonBack">Voltar</button><button type="button" class="button primary" id="poiClassifyPersonSave">Salvar identificação</button></div>`;
-    dialog.querySelector('.poi-classify-actions')?.insertAdjacentElement('afterend', picker);
+    actions?.insertAdjacentElement('afterend', picker);
+
+    const resetPicker = () => {
+      picker.hidden = true;
+      if (actions) actions.hidden = false;
+      if (cancel) cancel.hidden = false;
+      const input = document.getElementById('poiClassifyNewName');
+      if (input) input.value = '';
+    };
+    dialog.addEventListener('close', resetPicker);
 
     identify.addEventListener('click', async event => {
       event.preventDefault();
       event.stopImmediatePropagation();
       const select = document.getElementById('poiClassifyPersonSelect');
       picker.hidden = false;
-      dialog.querySelector('.poi-classify-actions').hidden = true;
-      document.getElementById('poiClassifyCancel').hidden = true;
+      if (actions) actions.hidden = true;
+      if (cancel) cancel.hidden = true;
       if (select) select.innerHTML = '<option value="">Carregando…</option>';
       let persons = [];
       try {
         if (typeof loadPersons === 'function') await loadPersons();
-        persons = Array.isArray(window.state?.persons) ? window.state.persons : [];
+        persons = personsFromState();
         if (!persons.length) persons = await api('/api/persons');
-      } catch (_) { persons = Array.isArray(window.state?.persons) ? window.state.persons : []; }
+      } catch (_) { persons = personsFromState(); }
       if (select) {
         select.innerHTML = `${persons.map(person => `<option value="${Number(person.id)}">${q(person.name)}</option>`).join('')}<option value="new">＋ Novo nome…</option>`;
         const title = document.getElementById('poiClassifyTitle')?.textContent?.replace(/\?$/, '').trim().toLowerCase();
@@ -455,11 +471,7 @@
       if (label) label.hidden = !isNew;
       if (isNew) setTimeout(() => document.getElementById('poiClassifyNewName')?.focus(), 0);
     });
-    document.getElementById('poiClassifyPersonBack')?.addEventListener('click', () => {
-      picker.hidden = true;
-      dialog.querySelector('.poi-classify-actions').hidden = false;
-      document.getElementById('poiClassifyCancel').hidden = false;
-    });
+    document.getElementById('poiClassifyPersonBack')?.addEventListener('click', resetPicker);
     document.getElementById('poiClassifyPersonSave')?.addEventListener('click', async () => {
       const eventId = Number(dialog.dataset.eventId || H.selectedEventId || 0);
       const select = document.getElementById('poiClassifyPersonSelect');
@@ -477,7 +489,7 @@
       try {
         const result = await api(`/api/identity/events/${eventId}/assign`, { method: 'POST', body: JSON.stringify(payload) });
         if (typeof toast === 'function') toast(`${result.person_name || 'Pessoa'} associado ao evento.`);
-        try { dialog.close(); } catch (_) { dialog.removeAttribute('open'); }
+        try { dialog.close(); } catch (_) { dialog.removeAttribute('open'); resetPicker(); }
         if (typeof loadPersons === 'function') await loadPersons();
         if (typeof loadEvents === 'function') await loadEvents();
         document.getElementById('poiTimelineRefresh')?.click();
@@ -486,7 +498,7 @@
         setTimeout(async () => {
           await loadDayData(true);
           syncSelectedEvent(eventId, true);
-        }, 350);
+        }, 380);
       } catch (error) {
         if (typeof toast === 'function') toast(`Classificação: ${error.message}`, 'error');
       }
@@ -504,18 +516,7 @@
     return true;
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      let attempts = 0;
-      const timer = setInterval(() => {
-        attempts += 1;
-        if (document.getElementById('poiTimelinePlayer')) {
-          clearInterval(timer);
-          init();
-        } else if (attempts > 80) clearInterval(timer);
-      }, 100);
-    }, { once: true });
-  } else {
+  function waitForPlayer() {
     let attempts = 0;
     const timer = setInterval(() => {
       attempts += 1;
@@ -525,4 +526,7 @@
       } else if (attempts > 80) clearInterval(timer);
     }, 100);
   }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', waitForPlayer, { once: true });
+  else waitForPlayer();
 })();
