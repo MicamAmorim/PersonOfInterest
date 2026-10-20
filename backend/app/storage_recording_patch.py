@@ -4,6 +4,7 @@ from typing import Any
 
 from . import db
 from . import false_positive_memory
+from . import go2rtc
 from . import tracking_v5_patch as tracking
 from . import vision
 from .storage_recording import RecorderManager, recorder_manager, storage_manager
@@ -29,7 +30,7 @@ def install() -> None:
                 "-rtsp_transport",
                 "tcp",
                 "-i",
-                __import__("backend.app.go2rtc", fromlist=["local_restream_url"]).local_restream_url(stream_name),
+                go2rtc.local_restream_url(stream_name),
                 "-map",
                 "0:v:0?",
                 "-map",
