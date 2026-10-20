@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -15,6 +16,14 @@ from .storage_recording import recorder_manager, storage_manager
 
 
 router = APIRouter()
+
+
+def _payload_dict(payload: BaseModel) -> dict[str, Any]:
+    """Support both Pydantic v1 and v2 installations."""
+    model_dump = getattr(payload, "model_dump", None)
+    if callable(model_dump):
+        return dict(model_dump(exclude_none=True))
+    return dict(payload.dict(exclude_none=True))
 
 
 class StorageSettingsUpdate(BaseModel):
@@ -54,8 +63,7 @@ def get_storage_settings() -> dict:
 @router.put("/api/storage/settings")
 def update_storage_settings(payload: StorageSettingsUpdate) -> dict:
     try:
-        values = payload.model_dump(exclude_none=True)
-        return storage_manager.update_settings(values)
+        return storage_manager.update_settings(_payload_dict(payload))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -72,13 +80,7 @@ def run_storage_cleanup() -> dict:
 
 @router.post("/api/storage/compact")
 def compact_database() -> dict:
-    """Explicit maintenance only: reclaim free SQLite pages on user request.
-
-    VACUUM is deliberately never scheduled in the background because it can take
-    an exclusive maintenance window on a large database. If another writer keeps
-    the DB busy, return 409 and let the user retry later instead of disturbing the
-    vision/alert pipeline.
-    """
+    """Explicit maintenance only: reclaim free SQLite pages on user request."""
     if not DB_PATH.exists():
         raise HTTPException(status_code=404, detail="Banco SQLite não encontrado")
     before = int(DB_PATH.stat().st_size)
@@ -181,7 +183,7 @@ def recording_settings() -> list[dict]:
 @router.put("/api/recording/cameras/{camera_id}")
 def update_recording_camera(camera_id: int, payload: RecordingSettingsUpdate) -> dict:
     try:
-        return recorder_manager.update_camera_settings(camera_id, payload.model_dump(exclude_none=True))
+        return recorder_manager.update_camera_settings(camera_id, _payload_dict(payload))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -244,10 +246,6 @@ def set_false_positive_prototype_state(prototype_id: int, payload: PrototypeStat
     if payload.active:
         ok = false_positive_memory.activate_prototype(prototype_id)
     else:
-        # A manual review historically also wrote body_negative_samples. Remove
-        # those matcher entries when the user presses “Desaprender”; otherwise
-        # the disabled persistent prototype would appear off in the UI while its
-        # legacy samples could still reject future detections.
         if member_event_ids:
             marks = ",".join("?" for _ in member_event_ids)
             with connection() as conn:
@@ -272,5 +270,27 @@ def set_false_positive_prototype_state(prototype_id: int, payload: PrototypeStat
 @router.post("/api/false-positives/backfill")
 def backfill_false_positive_memory() -> dict:
     result = false_positive_memory.backfill_existing(body_identity_manager)
+    false_positive_memory.ensure_schema()
+    # Once historical manual examples are represented by persistent prototypes,
+    # their legacy body_negative_samples rows are redundant. Delete only members
+    # that were successfully captured by the prototype tables.
+    with connection() as conn:
+        member_ids = [
+            int(row[0])
+            for row in conn.execute(
+                """SELECT DISTINCT source_event_id
+                FROM false_positive_prototype_members
+                WHERE source_event_id IS NOT NULL"""
+            ).fetchall()
+        ]
+        removed_legacy = 0
+        if member_ids:
+            marks = ",".join("?" for _ in member_ids)
+            cursor = conn.execute(
+                f"DELETE FROM body_negative_samples WHERE event_id IN ({marks})",
+                member_ids,
+            )
+            removed_legacy = max(0, int(cursor.rowcount or 0))
+            conn.commit()
     body_identity_manager.notify_change()
-    return {"ok": True, **result}
+    return {"ok": True, **result, "legacy_negative_samples_removed": removed_legacy}
