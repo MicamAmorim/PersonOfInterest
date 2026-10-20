@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from .db import connection
 from .storage_recording import RECORDINGS_DIR, recorder_manager, seconds_for
@@ -40,7 +41,6 @@ def _continuous_start(row: dict[str, Any], segment_seconds: float) -> datetime |
             parsed = local.astimezone(timezone.utc)
             path = (RECORDINGS_DIR / str(row.get("path") or "")).resolve()
             if path.is_file():
-                # Sanity guard for machines whose OS timezone changed after older files were recorded.
                 mtime_start = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) - timedelta(seconds=segment_seconds)
                 if abs((parsed - mtime_start).total_seconds()) > 6 * 3600:
                     return mtime_start
@@ -61,6 +61,19 @@ def _event_label(row: Any) -> str:
     if str(row["identity_state"] or "") == "false_positive":
         return "Falso positivo"
     return "Pessoa"
+
+
+@router.get("/api/timeline-player/recordings/{recording_id}")
+def timeline_recording_stream(recording_id: int) -> FileResponse:
+    """Inline MP4 endpoint used by the day player.
+
+    It intentionally omits a download filename so browsers can seek it as media.
+    Starlette FileResponse supplies byte-range support on supported runtime versions.
+    """
+    path = recorder_manager.recording_path(recording_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Gravação não encontrada")
+    return FileResponse(path, media_type="video/mp4")
 
 
 @router.get("/api/timeline-player/day")
@@ -105,8 +118,6 @@ def timeline_player_day(
             ORDER BY e.created_at ASC""",
             (int(camera_id), start_utc.isoformat(), end_utc.isoformat()),
         ).fetchall()
-        # Widen by one day because older continuous rows may have imprecise metadata;
-        # final placement is normalized from the segment itself below.
         recording_rows = conn.execute(
             """SELECT * FROM recording_files
             WHERE camera_id = ?
@@ -187,8 +198,7 @@ def timeline_player_day(
             "duration_seconds": max(0.0, (ended - started).total_seconds()),
             "size_bytes": int(row.get("size_bytes") or 0),
             "status": "active" if is_active else "complete",
-            # Active fragmented MP4 files are not guaranteed seekable until FFmpeg closes the segment.
-            "file_url": None if is_active else (f"/api/recordings/{int(row['id'])}/file" if file_exists else None),
+            "file_url": None if is_active else (f"/api/timeline-player/recordings/{int(row['id'])}" if file_exists else None),
         })
 
     for started, ended, row in event_candidates:
@@ -208,7 +218,7 @@ def timeline_player_day(
             "duration_seconds": max(0.0, (ended - started).total_seconds()),
             "size_bytes": int(row.get("size_bytes") or 0),
             "status": str(row.get("status") or "complete"),
-            "file_url": f"/api/recordings/{int(row['id'])}/file" if file_exists else None,
+            "file_url": f"/api/timeline-player/recordings/{int(row['id'])}" if file_exists else None,
         })
 
     normalized.sort(key=lambda item: (float(item["start_second"]), int(item["id"])))
