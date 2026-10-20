@@ -7,7 +7,8 @@ from . import false_positive_memory
 from . import go2rtc
 from . import tracking_v5_patch as tracking
 from . import vision
-from .storage_recording import RecorderManager, recorder_manager, storage_manager
+from .db import connection
+from .storage_recording import RecorderManager, StorageManager, recorder_manager, storage_manager
 
 
 def install() -> None:
@@ -45,6 +46,35 @@ def install() -> None:
 
         RecorderManager._base_command = compatible_base_command
         RecorderManager._poi_mp4_audio_compat = True
+
+    # Keep relational residue bounded too. Event cascades remove samples and track
+    # observations; this final sweep removes now-empty unknown clusters only.
+    if not getattr(StorageManager, "_poi_orphan_cluster_cleanup", False):
+        original_delete_events = StorageManager._delete_events
+
+        def delete_events_with_orphan_cleanup(self: Any, ids: list[int]) -> int:
+            deleted = original_delete_events(self, ids)
+            if deleted:
+                try:
+                    with connection() as conn:
+                        conn.execute(
+                            """DELETE FROM unknown_clusters
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM face_samples fs
+                                WHERE fs.cluster_id = unknown_clusters.id
+                            )
+                            AND NOT EXISTS (
+                                SELECT 1 FROM events e
+                                WHERE e.unknown_cluster_id = unknown_clusters.id
+                            )"""
+                        )
+                        conn.commit()
+                except Exception:
+                    pass
+            return deleted
+
+        StorageManager._delete_events = delete_events_with_orphan_cleanup
+        StorageManager._poi_orphan_cluster_cleanup = True
 
     # main.py imports init_db *after* package patches run. Wrapping it here lets
     # storage/recording initialize after the proven core schema exists without
