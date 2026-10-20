@@ -9,3 +9,4 @@ cryptography>=43,<47
 tzdata>=2025.2,<2027
 edge-tts>=7.3,<8
 faster-whisper>=1.1,<2
+imageio-ffmpeg>=0.5,<1
