@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from . import false_positive_memory
 from .body_identity import manager as body_identity_manager
+from .db import connection
 from .storage_recording import recorder_manager, storage_manager
 
 
@@ -65,6 +66,80 @@ def storage_status() -> dict:
 @router.post("/api/storage/cleanup")
 def run_storage_cleanup() -> dict:
     return storage_manager.cleanup_now()
+
+
+@router.get("/api/storage/events")
+def storage_timeline_events(
+    camera_id: int | None = Query(default=None, ge=1),
+    person_id: int | None = Query(default=None, ge=1),
+    unidentified: bool = False,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    has_face: bool | None = None,
+    false_positive_mode: str = Query(default="normal", pattern="^(normal|false|all)$"),
+    limit: int = Query(default=500, ge=1, le=500),
+) -> list[dict]:
+    """Timeline view that keeps learned false positives out of the normal feed."""
+    sql = """SELECT e.*, c.name AS camera_name, c.location AS camera_location,
+        p.name AS person_name, pp.name AS probable_person_name
+        FROM events e
+        JOIN cameras c ON c.id = e.camera_id
+        LEFT JOIN persons p ON p.id = e.person_id
+        LEFT JOIN persons pp ON pp.id = e.probable_person_id"""
+    where: list[str] = []
+    params: list[object] = []
+    if false_positive_mode == "normal":
+        where.append("COALESCE(e.identity_state, '') <> 'false_positive'")
+    elif false_positive_mode == "false":
+        where.append("COALESCE(e.identity_state, '') = 'false_positive'")
+    if camera_id is not None:
+        where.append("e.camera_id = ?")
+        params.append(camera_id)
+    if person_id is not None:
+        where.append("(e.person_id = ? OR (e.person_id IS NULL AND e.probable_person_id = ?))")
+        params.extend([person_id, person_id])
+    elif unidentified:
+        where.append("e.person_id IS NULL")
+    if from_ts:
+        where.append("e.created_at >= ?")
+        params.append(from_ts)
+    if to_ts:
+        where.append("e.created_at <= ?")
+        params.append(to_ts)
+    if has_face is not None:
+        where.append("e.has_face = ?")
+        params.append(int(has_face))
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY e.created_at DESC LIMIT ?"
+    params.append(limit)
+    with connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "camera_id": row["camera_id"],
+            "camera_name": row["camera_name"],
+            "camera_location": row["camera_location"],
+            "track_id": row["track_id"],
+            "event_type": row["event_type"],
+            "person_id": row["person_id"],
+            "person_name": row["person_name"],
+            "probable_person_id": row["probable_person_id"],
+            "probable_person_name": row["probable_person_name"],
+            "body_confidence": row["body_confidence"],
+            "body_identity_source": row["body_identity_source"],
+            "unknown_cluster_id": row["unknown_cluster_id"],
+            "identity_state": row["identity_state"],
+            "identity_confidence": row["identity_confidence"],
+            "has_face": bool(row["has_face"]),
+            "face_count": row["face_count"],
+            "confidence": row["confidence"],
+            "created_at": row["created_at"],
+            "snapshot_url": f"/api/events/{row['id']}/snapshot" if row["snapshot_path"] else None,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/api/recording/settings")
