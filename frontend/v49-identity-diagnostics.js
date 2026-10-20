@@ -28,6 +28,13 @@
       link.dataset.poiV54 = '1';
       document.head.appendChild(link);
     }
+    if (!document.querySelector('link[data-poi-v62]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/v62-hybrid-playback.css';
+      link.dataset.poiV62 = '1';
+      document.head.appendChild(link);
+    }
     if (!document.querySelector('script[data-poi-v50]')) {
       const script = document.createElement('script');
       script.src = '/v50-persistent.js';
@@ -68,6 +75,13 @@
       script.src = '/v57-device-push.js';
       script.defer = true;
       script.dataset.poiV57Push = '1';
+      document.body.appendChild(script);
+    }
+    if (!document.querySelector('script[data-poi-v62]')) {
+      const script = document.createElement('script');
+      script.src = '/v62-hybrid-playback.js';
+      script.defer = true;
+      script.dataset.poiV62 = '1';
       document.body.appendChild(script);
     }
   }
