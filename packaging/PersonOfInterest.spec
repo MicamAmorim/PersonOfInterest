@@ -33,6 +33,7 @@ for package in (
     "edge_tts",
     "faster_whisper",
     "huggingface_hub",
+    "imageio_ffmpeg",
     "onnxruntime",
     "pywebpush",
     "tokenizers",
