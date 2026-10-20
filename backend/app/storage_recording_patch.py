@@ -57,6 +57,28 @@ def install() -> None:
         RecorderManager._base_command = compatible_base_command
         RecorderManager._poi_mp4_audio_compat = True
 
+    # Saving a camera's recording configuration should take effect immediately.
+    # Stop only that camera's FFmpeg child after the DB update; the normal
+    # reconcile loop restarts it with the new duration/mode if required.
+    if not getattr(RecorderManager, "_poi_settings_restart", False):
+        original_update_camera_settings = RecorderManager.update_camera_settings
+
+        def update_camera_settings_and_restart(
+            self: Any,
+            camera_id: int,
+            values: dict[str, Any],
+        ) -> dict[str, Any]:
+            result = original_update_camera_settings(self, camera_id, values)
+            try:
+                self._stop_session(int(camera_id))
+            except Exception:
+                pass
+            self.notify_change()
+            return result
+
+        RecorderManager.update_camera_settings = update_camera_settings_and_restart
+        RecorderManager._poi_settings_restart = True
+
     # If retention cannot reclaim enough space (for example the only file is the
     # segment currently being written), stop recorders instead of allowing NVR
     # video to consume the host's final free bytes. Checks are cached for 5 s so
@@ -162,9 +184,6 @@ def install() -> None:
     def init_db_with_storage() -> None:
         original_init_db()
         try:
-            # Make V5 lifecycle columns available before retention queries inspect
-            # identity_origin/best snapshots. This only performs additive schema
-            # upgrades already owned by tracking_v5_patch.
             tracking.ensure_schema()
             false_positive_memory.ensure_schema()
             storage_manager.ensure_schema()
