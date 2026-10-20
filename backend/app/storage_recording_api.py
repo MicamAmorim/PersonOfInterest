@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 
 from . import false_positive_memory
 from .body_identity import manager as body_identity_manager
+from .config import DB_PATH
 from .db import connection
 from .storage_recording import recorder_manager, storage_manager
 
@@ -66,6 +68,35 @@ def storage_status() -> dict:
 @router.post("/api/storage/cleanup")
 def run_storage_cleanup() -> dict:
     return storage_manager.cleanup_now()
+
+
+@router.post("/api/storage/compact")
+def compact_database() -> dict:
+    """Explicit maintenance only: reclaim free SQLite pages on user request.
+
+    VACUUM is deliberately never scheduled in the background because it can take
+    an exclusive maintenance window on a large database. If another writer keeps
+    the DB busy, return 409 and let the user retry later instead of disturbing the
+    vision/alert pipeline.
+    """
+    if not DB_PATH.exists():
+        raise HTTPException(status_code=404, detail="Banco SQLite não encontrado")
+    before = int(DB_PATH.stat().st_size)
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
+        try:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Banco ocupado; tente compactar novamente em alguns instantes: {exc}",
+        ) from exc
+    after = int(DB_PATH.stat().st_size)
+    return {"ok": True, "before_bytes": before, "after_bytes": after, "freed_bytes": max(0, before - after)}
 
 
 @router.get("/api/storage/events")
@@ -193,15 +224,49 @@ def false_positive_prototype_image(prototype_id: int) -> FileResponse:
 
 @router.put("/api/false-positives/prototypes/{prototype_id}/state")
 def set_false_positive_prototype_state(prototype_id: int, payload: PrototypeStateUpdate) -> dict:
-    ok = (
-        false_positive_memory.activate_prototype(prototype_id)
-        if payload.active
-        else false_positive_memory.deactivate_prototype(prototype_id)
-    )
+    false_positive_memory.ensure_schema()
+    with connection() as conn:
+        exists = conn.execute(
+            "SELECT id FROM false_positive_prototypes WHERE id = ?",
+            (int(prototype_id),),
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(status_code=404, detail="Protótipo de falso positivo não encontrado")
+        member_event_ids = [
+            int(row["source_event_id"])
+            for row in conn.execute(
+                """SELECT source_event_id FROM false_positive_prototype_members
+                WHERE prototype_id = ? AND source_event_id IS NOT NULL""",
+                (int(prototype_id),),
+            ).fetchall()
+        ]
+
+    if payload.active:
+        ok = false_positive_memory.activate_prototype(prototype_id)
+    else:
+        # A manual review historically also wrote body_negative_samples. Remove
+        # those matcher entries when the user presses “Desaprender”; otherwise
+        # the disabled persistent prototype would appear off in the UI while its
+        # legacy samples could still reject future detections.
+        if member_event_ids:
+            marks = ",".join("?" for _ in member_event_ids)
+            with connection() as conn:
+                conn.execute(
+                    f"DELETE FROM body_negative_samples WHERE event_id IN ({marks})",
+                    member_event_ids,
+                )
+                conn.commit()
+        ok = false_positive_memory.deactivate_prototype(prototype_id)
+
     if not ok:
         raise HTTPException(status_code=404, detail="Protótipo de falso positivo não encontrado")
     body_identity_manager.notify_change()
-    return {"ok": True, "prototype_id": int(prototype_id), "active": bool(payload.active)}
+    return {
+        "ok": True,
+        "prototype_id": int(prototype_id),
+        "active": bool(payload.active),
+        "legacy_negative_samples_removed": len(member_event_ids) if not payload.active else 0,
+    }
 
 
 @router.post("/api/false-positives/backfill")
