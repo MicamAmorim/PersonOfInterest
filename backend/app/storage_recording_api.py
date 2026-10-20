@@ -213,8 +213,31 @@ def recording_file(recording_id: int) -> FileResponse:
 
 
 @router.get("/api/false-positives/prototypes")
-def list_false_positive_prototypes() -> list[dict]:
-    return false_positive_memory.list_prototypes()
+def list_false_positive_prototypes(
+    limit: int = Query(default=30, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=10_000_000),
+) -> list[dict]:
+    """Return a bounded slice; never materialize an unbounded prototype list in the UI."""
+    false_positive_memory.ensure_schema()
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT fp.id, fp.camera_id, c.name AS camera_name, fp.quality,
+                fp.support_count, fp.representative_path, fp.active, fp.first_seen,
+                fp.last_seen, fp.created_at, fp.updated_at
+            FROM false_positive_prototypes fp
+            JOIN cameras c ON c.id = fp.camera_id
+            ORDER BY fp.active DESC, fp.last_seen DESC, fp.id DESC
+            LIMIT ? OFFSET ?""",
+            (int(limit), int(offset)),
+        ).fetchall()
+    return [
+        {
+            **dict(row),
+            "active": bool(row["active"]),
+            "image_url": f"/api/false-positives/prototypes/{int(row['id'])}/image" if row["representative_path"] else None,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/api/false-positives/prototypes/{prototype_id}/image")
