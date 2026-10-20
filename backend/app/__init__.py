@@ -20,6 +20,7 @@ from .device_push_pause_patch import install as _install_device_push_pause_patch
 from .doorbell_patch import install as _install_doorbell_patch
 from .event_lifecycle_patch import install as _install_event_lifecycle_patch
 from .face_refinement_patch import install as _install_face_refinement_patch
+from .false_positive_memory_patch import install as _install_false_positive_memory_patch
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
 from .identity_manual_guard_patch import install as _install_identity_manual_guard_patch
 from .identity_safety_patch import install as _install_identity_safety_patch
@@ -28,6 +29,7 @@ from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
 from .reference_curator_patch import install as _install_reference_curator_patch
 from .snapshot_display_patch import install as _install_snapshot_display_patch
+from .storage_recording_patch import install as _install_storage_recording_patch
 from .tracking_v5_patch import install as _install_tracking_v5_patch
 from .spatial_vision_patch import install as _install_spatial_vision_patch
 
@@ -64,6 +66,9 @@ _install_body_trust_sync_patch()
 # User curation sits on top of automatic trust: disabled references stay disabled,
 # quarantine can be manually trusted, and face/body refs can be reassigned safely.
 _install_reference_curator_patch()
+# Manual false-positive examples are distilled into bounded camera-specific
+# prototypes that survive Timeline cleanup. Legacy hard-negatives stay active.
+_install_false_positive_memory_patch()
 # Legacy Body/Push workers must not race the collecting phase of an active track.
 _install_event_lifecycle_patch()
 # If an initially-unknown track yields a substantially better face later, refine
@@ -91,6 +96,9 @@ _install_doorbell_patch()
 # Notification pause is scoped to the current browser Push endpoint only; it
 # never disables global alert rules or another phone/PC subscription.
 _install_device_push_pause_patch()
+# Storage/recording are accessory services. They wrap DB startup/shutdown only;
+# detection, tracking and ReID remain owners of their existing lifecycle.
+_install_storage_recording_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -116,6 +124,7 @@ del _install_device_push_pause_patch
 del _install_doorbell_patch
 del _install_event_lifecycle_patch
 del _install_face_refinement_patch
+del _install_false_positive_memory_patch
 del _install_identity_diagnostics_patch
 del _install_identity_manual_guard_patch
 del _install_identity_safety_patch
@@ -124,5 +133,6 @@ del _install_manual_learning_patch
 del _install_ptz_safety_patch
 del _install_reference_curator_patch
 del _install_snapshot_display_patch
+del _install_storage_recording_patch
 del _install_tracking_v5_patch
 del _install_spatial_vision_patch
