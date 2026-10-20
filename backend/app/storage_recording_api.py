@@ -13,6 +13,7 @@ from .body_identity import manager as body_identity_manager
 from .config import DB_PATH
 from .db import connection
 from .storage_recording import recorder_manager, storage_manager
+from .timeline_player_api import router as timeline_player_router
 
 
 router = APIRouter()
@@ -294,3 +295,8 @@ def backfill_false_positive_memory() -> dict:
             conn.commit()
     body_identity_manager.notify_change()
     return {"ok": True, **result, "legacy_negative_samples_removed": removed_legacy}
+
+
+# Keep the day-player endpoint under the same additive router so main.py does not
+# need another integration point and the existing V5 motor remains untouched.
+router.include_router(timeline_player_router)
