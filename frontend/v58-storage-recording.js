@@ -5,7 +5,13 @@
     recorderStatus: null,
     prototypes: [],
     recordings: [],
+    editingRecording: new Set(),
+    prototypeLimit: Number(localStorage.getItem('poi.fp.list.limit') || 30),
+    timelineLimit: Number(localStorage.getItem('poi.timeline.legacy.limit') || 30),
   };
+
+  if (![10, 30, 50, 100, 200, 500].includes(V58.prototypeLimit)) V58.prototypeLimit = 30;
+  if (![15, 30, 50, 100, 200, 500].includes(V58.timelineLimit)) V58.timelineLimit = 30;
 
   const q = (value = '') => String(value).replace(/[&<>"']/g, ch => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -40,29 +46,51 @@
     return allowed.map(unit => `<option value="${unit}" ${unit === current ? 'selected' : ''}>${labels[unit]}</option>`).join('');
   }
 
+  function legacyLimitOptions() {
+    return [15, 30, 50, 100, 200, 500].map(n => `<option value="${n}" ${n === V58.timelineLimit ? 'selected' : ''}>${n}</option>`).join('');
+  }
+
+  function prototypeLimitOptions() {
+    return [10, 30, 50, 100, 200, 500].map(n => `<option value="${n}" ${n === V58.prototypeLimit ? 'selected' : ''}>${n}</option>`).join('');
+  }
+
   function installTimelineFilter() {
-    if (document.getElementById('timelineFalsePositiveMode')) return;
     const panel = document.querySelector('.timeline-filter-panel');
     const buttons = panel?.querySelector('.timeline-filter-buttons');
     if (!panel || !buttons) return;
 
-    const label = document.createElement('label');
-    label.innerHTML = `Exibição<select id="timelineFalsePositiveMode">
-      <option value="normal">Eventos normais</option>
-      <option value="false">Falsos positivos</option>
-      <option value="all">Todos</option>
-    </select>`;
-    panel.insertBefore(label, buttons);
+    if (!document.getElementById('timelineFalsePositiveMode')) {
+      const label = document.createElement('label');
+      label.innerHTML = `Exibição<select id="timelineFalsePositiveMode">
+        <option value="normal">Eventos normais</option>
+        <option value="false">Falsos positivos</option>
+        <option value="all">Todos</option>
+      </select>`;
+      panel.insertBefore(label, buttons);
+    }
+
+    if (!document.getElementById('timelineResultLimit')) {
+      const label = document.createElement('label');
+      label.innerHTML = `Máx. exibidos<select id="timelineResultLimit">${legacyLimitOptions()}</select>`;
+      panel.insertBefore(label, buttons);
+    }
 
     async function loadEventsV58() {
       try {
+        const limitEl = document.getElementById('timelineResultLimit');
+        const parsed = Number(limitEl?.value || V58.timelineLimit || 30);
+        V58.timelineLimit = [15, 30, 50, 100, 200, 500].includes(parsed) ? parsed : 30;
+        localStorage.setItem('poi.timeline.legacy.limit', String(V58.timelineLimit));
+
         const params = typeof timelineParams === 'function' ? timelineParams() : new URLSearchParams();
         params.set('false_positive_mode', document.getElementById('timelineFalsePositiveMode')?.value || 'normal');
-        params.set('limit', '500');
+        params.set('limit', String(V58.timelineLimit));
         state.events = await api(`/api/storage/events?${params.toString()}`);
         const visible = new Set(state.events.map(event => event.id));
         state.selectedEventIds = new Set([...state.selectedEventIds].filter(id => visible.has(id)));
         if (document.getElementById('eventCount')) document.getElementById('eventCount').textContent = state.events.length;
+        const legacyCount = document.getElementById('poiLegacyCount');
+        if (legacyCount) legacyCount.textContent = String(state.events.length);
         renderTimeline();
       } catch (error) {
         const grid = document.getElementById('timelineGrid');
@@ -74,7 +102,8 @@
 
     const intercept = (id, eventName = 'change') => {
       const el = document.getElementById(id);
-      if (!el) return;
+      if (!el || el.dataset.v58Bound === '1') return;
+      el.dataset.v58Bound = '1';
       el.addEventListener(eventName, event => {
         event.stopImmediatePropagation();
         loadEventsV58();
@@ -85,18 +114,22 @@
     intercept('timelinePerson');
     intercept('timelineFace');
     intercept('timelineFalsePositiveMode');
+    intercept('timelineResultLimit');
 
     const clear = document.getElementById('timelineClearFilters');
-    clear?.addEventListener('click', event => {
-      event.stopImmediatePropagation();
-      ['timelineCamera', 'timelinePerson', 'timelineDateFrom', 'timelineDateTo', 'timelineTimeFrom', 'timelineTimeTo', 'timelineFace'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-      });
-      const fp = document.getElementById('timelineFalsePositiveMode');
-      if (fp) fp.value = 'normal';
-      loadEventsV58();
-    }, true);
+    if (clear && clear.dataset.v58Bound !== '1') {
+      clear.dataset.v58Bound = '1';
+      clear.addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        ['timelineCamera', 'timelinePerson', 'timelineDateFrom', 'timelineDateTo', 'timelineTimeFrom', 'timelineTimeTo', 'timelineFace'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        const fp = document.getElementById('timelineFalsePositiveMode');
+        if (fp) fp.value = 'normal';
+        loadEventsV58();
+      }, true);
+    }
 
     loadEventsV58();
   }
@@ -118,14 +151,28 @@
       </section>
 
       <section class="panel v58-panel">
-        <div class="panel-header v58-heading"><div><p class="eyebrow">NVR · VÍDEO</p><h2>Gravação por câmera</h2><p class="muted paragraph">FFmpeg lê o restream local do go2rtc; tracker, Face ReID e Body ReID não participam da gravação.</p></div><span id="v58RecorderBadge" class="status-pill">verificando FFmpeg…</span></div>
+        <div class="panel-header v58-heading"><div><p class="eyebrow">NVR · VÍDEO</p><h2>Gravação por câmera</h2><p class="muted paragraph">Cada câmera salva sua própria configuração. A política global de retenção acima já possui valores padrão e é aplicada automaticamente.</p></div><span id="v58RecorderBadge" class="status-pill">verificando FFmpeg…</span></div>
         <div id="v58RecordingGrid" class="v58-recording-grid"><p class="muted">Carregando câmeras…</p></div>
         <div class="v58-subsection"><div class="v58-subhead"><div><strong>Gravações recentes</strong><span>Arquivos segmentados em disco</span></div><button class="button ghost small" id="v58RecordingsRefresh">↻ Atualizar</button></div><div id="v58RecordingsList" class="v58-recording-list"><p class="muted">Carregando…</p></div></div>
       </section>
 
-      <section class="panel v58-panel">
-        <div class="panel-header v58-heading"><div><p class="eyebrow">HARD NEGATIVE · MEMÓRIA PERSISTENTE</p><h2>Falsos positivos aprendidos</h2><p class="muted paragraph">Protótipos por câmera sobrevivem à limpeza da Timeline. Novos matches fortes são suprimidos antes do Push e aparecem apenas no filtro “Falsos positivos”.</p></div><button class="button ghost small" id="v58BackfillFP">Consolidar falsos positivos atuais</button></div>
-        <div id="v58PrototypeGrid" class="v58-prototype-grid"><p class="muted">Carregando memória negativa…</p></div>
+      <section class="panel v58-panel v58-fp-panel">
+        <details id="v58FpDetails" class="v58-details" ${localStorage.getItem('poi.fp.section.open') === '1' ? 'open' : ''}>
+          <summary>
+            <span class="v58-details-icon">◇</span>
+            <span><p class="eyebrow">HARD NEGATIVE · MEMÓRIA PERSISTENTE</p><strong>Falsos positivos aprendidos</strong><small>Protótipos persistentes; a lista é carregada de forma limitada para não degradar a interface.</small></span>
+            <span id="v58FpLoadedCount" class="v58-details-count">—</span>
+            <span class="v58-details-chevron">⌄</span>
+          </summary>
+          <div class="v58-details-body">
+            <div class="v58-fp-toolbar">
+              <label>Máx. registros<select id="v58FpLimit">${prototypeLimitOptions()}</select></label>
+              <button class="button ghost small" id="v58BackfillFP">Consolidar falsos positivos atuais</button>
+            </div>
+            <p class="muted paragraph">Novos matches fortes são suprimidos antes do Push e aparecem apenas no filtro “Falsos positivos”.</p>
+            <div id="v58PrototypeGrid" class="v58-prototype-grid"><p class="muted">Carregando memória negativa…</p></div>
+          </div>
+        </details>
       </section>`;
     view.appendChild(root);
 
@@ -133,6 +180,15 @@
     document.getElementById('v58CleanupNow')?.addEventListener('click', runCleanup);
     document.getElementById('v58RecordingsRefresh')?.addEventListener('click', loadRecordings);
     document.getElementById('v58BackfillFP')?.addEventListener('click', backfillFalsePositives);
+    document.getElementById('v58FpLimit')?.addEventListener('change', event => {
+      const next = Number(event.target.value || 30);
+      V58.prototypeLimit = [10, 30, 50, 100, 200, 500].includes(next) ? next : 30;
+      localStorage.setItem('poi.fp.list.limit', String(V58.prototypeLimit));
+      loadPrototypes();
+    });
+    document.getElementById('v58FpDetails')?.addEventListener('toggle', event => {
+      localStorage.setItem('poi.fp.section.open', event.target.open ? '1' : '0');
+    });
     return true;
   }
 
@@ -210,6 +266,28 @@
     } catch (error) { toast(`Limpeza: ${error.message}`, 'error'); }
   }
 
+  function unitLabel(value, unit) {
+    const labels = { seconds: ['segundo', 'segundos'], minutes: ['minuto', 'minutos'], hours: ['hora', 'horas'], days: ['dia', 'dias'] };
+    const pair = labels[unit] || [unit, unit];
+    return `${Number(value)} ${Number(value) === 1 ? pair[0] : pair[1]}`;
+  }
+
+  function recordingSummary(item, session, error) {
+    if (error) return { state: error, detail: 'Verifique o erro do gravador', cls: 'error' };
+    if (session?.running) return { state: '● gravando agora', detail: item.mode === 'continuous' ? 'gravação contínua' : 'evento em andamento', cls: 'active' };
+    if (item.mode === 'event') return { state: 'Configurada · aguardando próximo evento', detail: `${unitLabel(item.event_duration_value, item.event_duration_unit)} após cada evento`, cls: 'ready' };
+    if (item.mode === 'continuous') return { state: 'Configurada · gravação contínua', detail: `arquivos de ${unitLabel(item.segment_duration_value, item.segment_duration_unit)}`, cls: 'ready' };
+    return { state: 'Gravação desativada', detail: 'nenhum vídeo será salvo', cls: 'off' };
+  }
+
+  function syncRecordingFormVisibility(cameraId) {
+    const mode = document.querySelector(`[data-rec-mode="${cameraId}"]`)?.value || 'off';
+    const eventField = document.querySelector(`[data-rec-event-field="${cameraId}"]`);
+    const segmentField = document.querySelector(`[data-rec-segment-field="${cameraId}"]`);
+    if (eventField) eventField.hidden = mode !== 'event';
+    if (segmentField) segmentField.hidden = mode !== 'continuous';
+  }
+
   function renderRecording(settings, status) {
     V58.recording = settings || [];
     V58.recorderStatus = status || {};
@@ -224,42 +302,91 @@
       grid.innerHTML = '<p class="muted">Nenhuma câmera cadastrada.</p>';
       return;
     }
+
     const sessions = new Map((status.sessions || []).map(item => [Number(item.camera_id), item]));
     grid.innerHTML = settings.map(item => {
       const id = Number(item.camera_id);
       const session = sessions.get(id);
       const error = status.errors?.[String(id)];
-      return `<article class="v58-camera-recording" data-record-camera="${id}">
-        <div class="v58-camera-recording-head"><div><strong>${q(item.camera_name)}</strong><span>${session?.running ? `● gravando ${q(session.mode)}` : item.mode === 'off' ? 'gravação desativada' : 'aguardando'}</span></div>${error ? `<span class="v58-error">${q(error)}</span>` : ''}</div>
-        <label>Modo<select data-rec-mode="${id}"><option value="off" ${item.mode === 'off' ? 'selected' : ''}>Desativada</option><option value="event" ${item.mode === 'event' ? 'selected' : ''}>Somente quando houver evento</option><option value="continuous" ${item.mode === 'continuous' ? 'selected' : ''}>Contínua 24/7</option></select></label>
-        <label>Tempo após evento<div class="v58-inline"><input data-rec-event-value="${id}" type="number" min="1" step="1" value="${Number(item.event_duration_value || 60)}"><select data-rec-event-unit="${id}">${timeOptions(item.event_duration_unit || 'seconds', ['seconds','minutes','hours','days'])}</select></div></label>
-        <label>Duração dos arquivos<div class="v58-inline"><input data-rec-segment-value="${id}" type="number" min="1" step="1" value="${Number(item.segment_duration_value || 5)}"><select data-rec-segment-unit="${id}">${timeOptions(item.segment_duration_unit || 'minutes', ['minutes','hours','days'])}</select></div></label>
-        <button class="button primary small" data-rec-save="${id}">Salvar gravação desta câmera</button>
+      const editing = V58.editingRecording.has(id);
+      const summary = recordingSummary(item, session, error);
+      const modeText = item.mode === 'event' ? 'Somente eventos' : item.mode === 'continuous' ? 'Contínua 24/7' : 'Desativada';
+
+      if (!editing) {
+        return `<article class="v58-camera-recording collapsed ${summary.cls}" data-record-camera="${id}">
+          <div class="v58-camera-recording-head">
+            <div><strong>${q(item.camera_name)}</strong><span>${q(summary.state)}</span></div>
+            <span class="v58-mode-pill ${item.mode}">${q(modeText)}</span>
+          </div>
+          <div class="v58-recording-summary"><span>${q(summary.detail)}</span>${error ? `<b class="v58-error">${q(error)}</b>` : ''}</div>
+          <div class="v58-recording-actions">
+            <button class="button ghost small" type="button" data-rec-edit="${id}">${item.mode === 'off' ? 'Configurar' : 'Editar'}</button>
+            ${item.mode === 'off' ? '' : `<button class="button danger small" type="button" data-rec-disable="${id}">Desativar</button>`}
+          </div>
+        </article>`;
+      }
+
+      return `<article class="v58-camera-recording editing" data-record-camera="${id}">
+        <div class="v58-camera-recording-head"><div><strong>${q(item.camera_name)}</strong><span>Editando configuração</span></div>${error ? `<span class="v58-error">${q(error)}</span>` : ''}</div>
+        <label class="v58-rec-wide">Modo<select data-rec-mode="${id}"><option value="off" ${item.mode === 'off' ? 'selected' : ''}>Desativada</option><option value="event" ${item.mode === 'event' ? 'selected' : ''}>Somente quando houver evento</option><option value="continuous" ${item.mode === 'continuous' ? 'selected' : ''}>Contínua 24/7</option></select></label>
+        <label data-rec-event-field="${id}">Tempo após evento<div class="v58-inline"><input data-rec-event-value="${id}" type="number" min="1" step="1" value="${Number(item.event_duration_value || 60)}"><select data-rec-event-unit="${id}">${timeOptions(item.event_duration_unit || 'seconds', ['seconds','minutes','hours','days'])}</select></div><small>Um novo evento enquanto grava estende esse prazo.</small></label>
+        <label data-rec-segment-field="${id}">Duração dos arquivos<div class="v58-inline"><input data-rec-segment-value="${id}" type="number" min="1" step="1" value="${Number(item.segment_duration_value || 5)}"><select data-rec-segment-unit="${id}">${timeOptions(item.segment_duration_unit || 'minutes', ['minutes','hours','days'])}</select></div><small>Usado apenas na gravação contínua; ao terminar um arquivo o próximo começa automaticamente.</small></label>
+        <div class="v58-recording-actions v58-rec-wide"><button class="button ghost small" type="button" data-rec-cancel="${id}">Cancelar</button><button class="button primary small" type="button" data-rec-save="${id}">Salvar gravação desta câmera</button></div>
       </article>`;
     }).join('');
+
+    grid.querySelectorAll('[data-rec-edit]').forEach(button => button.addEventListener('click', () => {
+      V58.editingRecording.add(Number(button.dataset.recEdit));
+      renderRecording(V58.recording, V58.recorderStatus);
+    }));
+    grid.querySelectorAll('[data-rec-cancel]').forEach(button => button.addEventListener('click', () => {
+      V58.editingRecording.delete(Number(button.dataset.recCancel));
+      renderRecording(V58.recording, V58.recorderStatus);
+    }));
+    grid.querySelectorAll('[data-rec-disable]').forEach(button => button.addEventListener('click', () => disableRecordingCamera(Number(button.dataset.recDisable))));
     grid.querySelectorAll('[data-rec-save]').forEach(button => button.addEventListener('click', () => saveRecordingCamera(Number(button.dataset.recSave))));
+    grid.querySelectorAll('[data-rec-mode]').forEach(selectEl => {
+      const id = Number(selectEl.dataset.recMode);
+      selectEl.addEventListener('change', () => syncRecordingFormVisibility(id));
+      syncRecordingFormVisibility(id);
+    });
+  }
+
+  async function disableRecordingCamera(cameraId) {
+    const item = V58.recording.find(row => Number(row.camera_id) === cameraId);
+    if (!item || item.mode === 'off') return;
+    if (!confirm(`Desativar a gravação de ${item.camera_name}? Os vídeos já salvos serão preservados pela política de retenção.`)) return;
+    try {
+      await api(`/api/recording/cameras/${cameraId}`, { method: 'PUT', body: JSON.stringify({ mode: 'off' }) });
+      V58.editingRecording.delete(cameraId);
+      toast('Gravação desativada para esta câmera.');
+      await loadRecording();
+    } catch (error) { toast(`Gravação: ${error.message}`, 'error'); }
   }
 
   async function saveRecordingCamera(cameraId) {
     const mode = document.querySelector(`[data-rec-mode="${cameraId}"]`)?.value || 'off';
-    const old = V58.recording.find(item => Number(item.camera_id) === cameraId)?.mode || 'off';
+    const oldItem = V58.recording.find(item => Number(item.camera_id) === cameraId);
+    const old = oldItem?.mode || 'off';
     if (mode !== 'off' && old === 'off') {
       const text = mode === 'continuous'
-        ? 'Ativar gravação contínua nesta câmera? O limite de disco e a retenção configurados em Armazenamento serão aplicados.'
-        : 'Ativar gravação por evento nesta câmera? Cada evento iniciará/estenderá uma gravação pelo tempo configurado.';
+        ? 'Ativar gravação contínua nesta câmera? A política global de retenção e espaço em disco será aplicada automaticamente.'
+        : 'Ativar gravação por evento nesta câmera? Cada evento iniciará ou estenderá a gravação pelo tempo configurado.';
       if (!confirm(text)) return;
     }
     const payload = {
       mode,
-      event_duration_value: Number(document.querySelector(`[data-rec-event-value="${cameraId}"]`)?.value || 60),
-      event_duration_unit: document.querySelector(`[data-rec-event-unit="${cameraId}"]`)?.value || 'seconds',
-      segment_duration_value: Number(document.querySelector(`[data-rec-segment-value="${cameraId}"]`)?.value || 5),
-      segment_duration_unit: document.querySelector(`[data-rec-segment-unit="${cameraId}"]`)?.value || 'minutes',
+      event_duration_value: Number(document.querySelector(`[data-rec-event-value="${cameraId}"]`)?.value || oldItem?.event_duration_value || 60),
+      event_duration_unit: document.querySelector(`[data-rec-event-unit="${cameraId}"]`)?.value || oldItem?.event_duration_unit || 'seconds',
+      segment_duration_value: Number(document.querySelector(`[data-rec-segment-value="${cameraId}"]`)?.value || oldItem?.segment_duration_value || 5),
+      segment_duration_unit: document.querySelector(`[data-rec-segment-unit="${cameraId}"]`)?.value || oldItem?.segment_duration_unit || 'minutes',
     };
     try {
       await api(`/api/recording/cameras/${cameraId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      V58.editingRecording.delete(cameraId);
       toast('Configuração de gravação salva.');
-      setTimeout(loadRecording, 500);
+      await loadRecording();
+      setTimeout(loadRecording, 1000);
     } catch (error) { toast(`Gravação: ${error.message}`, 'error'); }
   }
 
@@ -277,6 +404,8 @@
 
   function renderPrototypes(items) {
     V58.prototypes = items || [];
+    const loaded = document.getElementById('v58FpLoadedCount');
+    if (loaded) loaded.textContent = `${V58.prototypes.length} exibido(s)`;
     const grid = document.getElementById('v58PrototypeGrid');
     if (!grid) return;
     if (!items.length) {
@@ -337,7 +466,7 @@
   }
 
   async function loadPrototypes() {
-    try { renderPrototypes(await api('/api/false-positives/prototypes')); }
+    try { renderPrototypes(await api(`/api/false-positives/prototypes?limit=${encodeURIComponent(V58.prototypeLimit)}`)); }
     catch (error) {
       const grid = document.getElementById('v58PrototypeGrid');
       if (grid) grid.innerHTML = `<p class="muted">${q(error.message)}</p>`;
