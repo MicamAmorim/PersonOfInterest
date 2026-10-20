@@ -4,6 +4,36 @@ from typing import Any
 
 from . import body_identity as bi
 from . import false_positive_memory as memory
+from .db import connection
+
+
+def _expand_persistent_support(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose bounded manual support to the proven hard-negative ranker.
+
+    rank_hard_negative already requires repeated evidence for the normal reject
+    path. A persistent prototype represents several reviewed negatives, so up to
+    three virtual copies are supplied according to support_count. This does not
+    change any Body ReID positive threshold or scoring rule.
+    """
+    if not items:
+        return []
+    prototype_ids = [int(item["prototype_id"]) for item in items if item.get("prototype_id")]
+    support: dict[int, int] = {}
+    if prototype_ids:
+        marks = ",".join("?" for _ in prototype_ids)
+        with connection() as conn:
+            rows = conn.execute(
+                f"SELECT id, support_count FROM false_positive_prototypes WHERE id IN ({marks})",
+                prototype_ids,
+            ).fetchall()
+        support = {int(row["id"]): max(1, int(row["support_count"] or 1)) for row in rows}
+
+    output: list[dict[str, Any]] = []
+    for item in items:
+        prototype_id = int(item.get("prototype_id") or 0)
+        copies = min(3, support.get(prototype_id, 1))
+        output.extend(dict(item) for _ in range(copies))
+    return output
 
 
 def install() -> None:
@@ -20,7 +50,7 @@ def install() -> None:
         # bounded persistent prototypes that survive Timeline retention.
         legacy = original_negative_gallery(self, camera_id)
         try:
-            persistent = memory.negative_gallery(int(camera_id))
+            persistent = _expand_persistent_support(memory.negative_gallery(int(camera_id)))
         except Exception as exc:
             self.error = f"Memória de falso positivo: {exc}"
             persistent = []
