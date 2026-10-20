@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import time
 from typing import Any
 
 from . import db
@@ -7,8 +9,16 @@ from . import false_positive_memory
 from . import go2rtc
 from . import tracking_v5_patch as tracking
 from . import vision
+from .config import DATA_DIR
 from .db import connection
-from .storage_recording import RecorderManager, StorageManager, recorder_manager, storage_manager
+from .storage_recording import (
+    RECORDINGS_DIR,
+    RecorderManager,
+    StorageManager,
+    _directory_size,
+    recorder_manager,
+    storage_manager,
+)
 
 
 def install() -> None:
@@ -46,6 +56,74 @@ def install() -> None:
 
         RecorderManager._base_command = compatible_base_command
         RecorderManager._poi_mp4_audio_compat = True
+
+    # If retention cannot reclaim enough space (for example the only file is the
+    # segment currently being written), stop recorders instead of allowing NVR
+    # video to consume the host's final free bytes. Checks are cached for 5 s so
+    # large recording trees are not walked every recorder tick.
+    if not getattr(RecorderManager, "_poi_disk_guard", False):
+        original_reconcile = RecorderManager._reconcile
+
+        def disk_pressure(self: Any, *, force: bool = False) -> tuple[bool, str]:
+            now_mono = time.monotonic()
+            cached_at = float(getattr(self, "_poi_disk_guard_checked_at", 0.0) or 0.0)
+            if not force and now_mono - cached_at < 5.0:
+                return getattr(self, "_poi_disk_guard_result", (False, ""))
+            settings = storage_manager.settings()
+            try:
+                free_bytes = int(shutil.disk_usage(DATA_DIR).free)
+            except OSError:
+                free_bytes = 0
+            recording_bytes = _directory_size(RECORDINGS_DIR)
+            reserve_bytes = int(float(settings.get("disk_reserve_gb") or 0) * (1024**3))
+            max_bytes = int(float(settings.get("recording_max_gb") or 0) * (1024**3))
+            reasons: list[str] = []
+            if reserve_bytes > 0 and free_bytes < reserve_bytes:
+                reasons.append(
+                    f"espaço livre {free_bytes / (1024**3):.2f} GB abaixo da reserva de {reserve_bytes / (1024**3):.2f} GB"
+                )
+            if max_bytes > 0 and recording_bytes > max_bytes:
+                reasons.append(
+                    f"gravações {recording_bytes / (1024**3):.2f} GB acima do limite de {max_bytes / (1024**3):.2f} GB"
+                )
+            result = (bool(reasons), "; ".join(reasons))
+            self._poi_disk_guard_checked_at = now_mono
+            self._poi_disk_guard_result = result
+            return result
+
+        def guarded_reconcile(self: Any) -> None:
+            pressured, reason = disk_pressure(self)
+            if pressured:
+                last_cleanup = float(getattr(self, "_poi_disk_guard_cleanup_at", 0.0) or 0.0)
+                if time.monotonic() - last_cleanup >= 30.0:
+                    self._poi_disk_guard_cleanup_at = time.monotonic()
+                    try:
+                        storage_manager.cleanup_now()
+                    except Exception:
+                        pass
+                    self._poi_disk_guard_checked_at = 0.0
+                    pressured, reason = disk_pressure(self, force=True)
+
+            if pressured:
+                for camera_id in list(self.sessions):
+                    self._stop_session(camera_id)
+                try:
+                    for setting in self.settings():
+                        if str(setting.get("mode") or "off") != "off":
+                            self.errors[int(setting["camera_id"])] = (
+                                "Gravação pausada por proteção de disco: " + reason
+                            )
+                except Exception:
+                    pass
+                return
+
+            for camera_id, error in list(self.errors.items()):
+                if str(error).startswith("Gravação pausada por proteção de disco:"):
+                    self.errors.pop(camera_id, None)
+            original_reconcile(self)
+
+        RecorderManager._reconcile = guarded_reconcile
+        RecorderManager._poi_disk_guard = True
 
     # Keep relational residue bounded too. Event cascades remove samples and track
     # observations; this final sweep removes now-empty unknown clusters only.
