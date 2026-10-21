@@ -147,6 +147,13 @@
       script.dataset.poiV68 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v69]')) {
+      const script = document.createElement('script');
+      script.src = '/v69-tonho-media-navigation.js';
+      script.defer = true;
+      script.dataset.poiV69 = '1';
+      document.body.appendChild(script);
+    }
   }
 
   function install() {
