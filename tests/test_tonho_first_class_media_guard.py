@@ -35,11 +35,13 @@ def test_v69_merges_visual_and_tonho_media_chronologically() -> None:
     assert "type: 'audio'" in script
     assert "function nextTemporal(second)" in script
     assert "function previousTemporal(second)" in script
+    assert "const threshold = Number(second) - .35" in script
+    assert "activeVisual" not in script
     assert "function visualAt(second)" in script
     assert "function audioAt(second)" in script
 
 
 def test_service_worker_caches_v69_navigation_revision() -> None:
     sw = (ROOT / "frontend" / "sw.js").read_text(encoding="utf-8")
-    assert "personofinterest-v6.9.1-unified-timeline-navigation" in sw
+    assert "personofinterest-v6.9.2-chronological-navigation" in sw
     assert "'/v69-tonho-media-navigation.js'" in sw
