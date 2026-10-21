@@ -9,6 +9,13 @@ def install() -> None:
 
     install_manual_identity_persistence()
 
+    # Full-system diagnostics are observational only. Install their API/error
+    # hooks from this already-late patch so they can see the final wrapped
+    # managers without changing detector/tracker/ReID ownership.
+    from .session_diagnostics_patch import install as install_session_diagnostics
+
+    install_session_diagnostics()
+
     from . import api_v34
     from .timeline_analysis_api import router as timeline_analysis_router
 
