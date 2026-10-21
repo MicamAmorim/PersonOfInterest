@@ -1,5 +1,5 @@
 (() => {
-  const state69 = {
+  const S = {
     analysis: null,
     day: null,
     key: '',
@@ -7,37 +7,48 @@
     audioTimer: null,
   };
 
-  const q = id => document.getElementById(id);
+  const el = id => document.getElementById(id);
+  const esc = (value = '') => String(value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+
+  function clock(seconds) {
+    const total = Math.max(0, Math.min(86400, Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = Math.floor(total % 60);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
 
   function cameraId() {
-    return Number(q('poiTimelineCamera')?.value || 0) || null;
+    return Number(el('poiTimelineCamera')?.value || 0) || null;
   }
 
   function dateValue() {
-    return q('poiTimelineDate')?.value || '';
+    return el('poiTimelineDate')?.value || '';
   }
 
   function currentSecond() {
-    return Number(q('poiDayScrubber')?.value || 0) || 0;
+    return Number(el('poiDayScrubber')?.value || 0) || 0;
   }
 
   function pauseOnEvents() {
-    return Boolean(q('poiV63PauseEvents')?.checked);
+    return Boolean(el('poiV63PauseEvents')?.checked);
   }
 
   function hybridPlaying() {
-    const play = q('poiHybridPlay');
-    const video = q('poiTimelineVideo');
+    const play = el('poiHybridPlay');
+    const video = el('poiTimelineVideo');
     return Boolean(play?.textContent?.includes('❚') || (video && !video.hidden && !video.paused && !video.ended));
   }
 
   function pauseHybrid() {
-    const play = q('poiHybridPlay');
+    const play = el('poiHybridPlay');
     if (play?.textContent?.includes('❚')) {
       play.click();
       return;
     }
-    const video = q('poiTimelineVideo');
+    const video = el('poiTimelineVideo');
     if (video && !video.hidden && !video.paused) {
       try { video.pause(); } catch (_) {}
     }
@@ -48,32 +59,30 @@
     const date = dateValue();
     if (!cid || !date) return null;
     const key = `${cid}|${date}`;
-    if (!force && state69.analysis && state69.day && state69.key === key) {
-      return { analysis: state69.analysis, day: state69.day };
-    }
-    if (state69.loading && state69.key === key) return state69.loading;
-    state69.key = key;
+    if (!force && S.analysis && S.day && S.key === key) return { analysis: S.analysis, day: S.day };
+    if (S.loading && S.key === key) return S.loading;
+    S.key = key;
     const offset = -new Date().getTimezoneOffset();
-    state69.loading = Promise.all([
+    S.loading = Promise.all([
       api(`/api/timeline-player/analysis?camera_id=${encodeURIComponent(cid)}&date=${encodeURIComponent(date)}&utc_offset_minutes=${encodeURIComponent(offset)}`),
       api(`/api/timeline-player/day?camera_id=${encodeURIComponent(cid)}&date=${encodeURIComponent(date)}&utc_offset_minutes=${encodeURIComponent(offset)}`),
     ]).then(([analysis, day]) => {
-      state69.analysis = analysis;
-      state69.day = day;
+      S.analysis = analysis;
+      S.day = day;
       return { analysis, day };
-    }).catch(() => null).finally(() => { state69.loading = null; });
-    return state69.loading;
+    }).catch(() => null).finally(() => { S.loading = null; });
+    return S.loading;
   }
 
   function audioSessions() {
-    return Array.isArray(state69.analysis?.audio_sessions) ? state69.analysis.audio_sessions : [];
+    return Array.isArray(S.analysis?.audio_sessions) ? S.analysis.audio_sessions : [];
   }
 
   function visualItems() {
-    const recordings = (state69.day?.recordings || [])
+    const recordings = (S.day?.recordings || [])
       .filter(rec => rec.file_url && Number(rec.end_second) > Number(rec.start_second))
       .map(rec => ({ type: 'visual', start: Number(rec.start_second || 0), end: Number(rec.end_second || 0), rec }));
-    const events = (state69.day?.events || [])
+    const events = (S.day?.events || [])
       .filter(event => event.snapshot_url)
       .filter(event => !recordings.some(item => item.start <= Number(event.second || 0) && Number(event.second || 0) <= item.end))
       .map(event => ({ type: 'visual', start: Number(event.second || 0), end: Number(event.second || 0), event }));
@@ -98,85 +107,86 @@
     return items.length ? items[items.length - 1] : null;
   }
 
-  function visualAt(second) {
-    const t = Number(second) || 0;
-    return visualItems().find(item => item.type === 'visual' && item.rec && item.start <= t && t <= item.end) || null;
-  }
-
   function seekExact(second) {
-    const scrubber = q('poiDayScrubber');
+    const scrubber = el('poiDayScrubber');
     if (!scrubber) return;
-    const max = Number(scrubber.max || state69.analysis?.day_duration_seconds || 86400);
+    const max = Number(scrubber.max || S.analysis?.day_duration_seconds || 86400);
     scrubber.value = String(Math.max(0, Math.min(max, Math.round(Number(second) || 0))));
-    // `input` updates the needle/clock. `change` asks V6.0 to render visual media
-    // exactly at this timestamp. V6.9 immediately restores the Tonho focus after
-    // that synchronous visual selection, so audio-only sessions never get stuck
-    // on the generic empty-state and sessions inside real video stay over video.
     scrubber.dispatchEvent(new Event('input', { bubbles: true }));
     scrubber.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function clearVisualSelectionForAudio() {
     document.querySelectorAll('#poiV63EventTrack [data-event-id], #poiV63ClipTrack [data-event-id], #poiEventMarkers [data-event-id], #poiEventStrip [data-event-card]')
-      .forEach(el => el.classList.remove('selected'));
-    const eventOverlay = q('poiV63EventOverlay');
+      .forEach(node => node.classList.remove('selected'));
+    const eventOverlay = el('poiV63EventOverlay');
     if (eventOverlay) eventOverlay.hidden = true;
-    const bbox = q('poiV66BBox');
+    const bbox = el('poiV66BBox');
     if (bbox) bbox.hidden = true;
-    const classify = q('poiTimelineClassify');
+    const classify = el('poiTimelineClassify');
     if (classify) {
       classify.hidden = true;
       delete classify.dataset.eventId;
     }
   }
 
-  function directFocusAudio(session) {
-    if (!session) return false;
-    const direct = window.poiV66FocusAudioSession;
-    if (typeof direct === 'function') {
-      direct(session);
-      return true;
+  function hideAudioOverlay() {
+    const overlay = el('poiV66AudioOverlay');
+    if (overlay) overlay.hidden = true;
+    document.querySelectorAll('#poiV66AudioTrack [data-audio-id]').forEach(node => node.classList.remove('selected'));
+  }
+
+  function renderAudioOverlay(session) {
+    const overlay = el('poiV66AudioOverlay');
+    if (!overlay || !session) return false;
+    document.querySelectorAll('#poiV66AudioTrack [data-audio-id]').forEach(node => {
+      node.classList.toggle('selected', Number(node.dataset.audioId) === Number(session.id));
+    });
+    const time = el('poiV66AudioTime');
+    const turns = el('poiV66AudioTurns');
+    if (time) time.textContent = clock(session.start_second);
+    if (turns) {
+      turns.innerHTML = (session.turns || []).map(turn => `
+        <div class="poi-v66-audio-turn">
+          <b>Você</b><p>${esc(turn.user || '—')}</p>
+          <b class="tonho">Tonho</b><p>${esc(turn.tonho || '—')}</p>
+        </div>`).join('') || '<div class="poi-v66-audio-turn"><p>Wake do Tonho detectado.</p></div>';
     }
-    // Backward-compatible fallback for a partially cached frontend. This is no
-    // longer the normal path, but keeps the page usable while the service worker
-    // finishes replacing older assets.
-    const button = document.querySelector(`#poiV66AudioTrack [data-audio-id="${Number(session.id)}"]`);
-    if (button) {
-      button.click();
-      return true;
-    }
-    return false;
+    overlay.hidden = false;
+    return true;
   }
 
   function focusAudio(session, { fromPlayback = false } = {}) {
     if (!session) return;
-    if (state69.audioTimer) clearTimeout(state69.audioTimer);
+    if (S.audioTimer) clearTimeout(S.audioTimer);
     const wasPlaying = fromPlayback || hybridPlaying();
     pauseHybrid();
     clearVisualSelectionForAudio();
-    const second = Number(session.start_second || 0);
-    seekExact(second);
+    seekExact(Number(session.start_second || 0));
 
-    // V6.0's scrubber `change` listener is synchronous. Render Tonho directly in
-    // the same task; do not wait for or simulate a DOM click on the audio track.
-    directFocusAudio(session);
-    requestAnimationFrame(() => directFocusAudio(session));
+    // Do not simulate a click on the audio track. V6.0 synchronously finishes its
+    // visual selection first, then Tonho is rendered directly. If real video
+    // covers this timestamp it stays underneath; otherwise V6.7 enters audio-only
+    // mode and hides the generic "Escolha um ponto" placeholder.
+    renderAudioOverlay(session);
+    requestAnimationFrame(() => renderAudioOverlay(session));
 
     if (wasPlaying && !pauseOnEvents()) {
       const visibleMs = Math.max(1600, Math.min(6000, Number(session.duration_seconds || 4) * 650));
-      state69.audioTimer = setTimeout(async () => {
+      S.audioTimer = setTimeout(async () => {
         await loadData(false);
         const after = Number(session.end_second || session.start_second || 0) + .05;
-        const a = nextAudio(after);
-        const v = nextVisual(after);
-        if (a && (!v || Number(a.start_second) < Number(v.start))) {
-          focusAudio(a, { fromPlayback: true });
+        const audio = nextAudio(after);
+        const visual = nextVisual(after);
+        if (audio && (!visual || Number(audio.start_second) < Number(visual.start))) {
+          focusAudio(audio, { fromPlayback: true });
           return;
         }
-        if (v) {
-          seekExact(v.start);
+        if (visual) {
+          hideAudioOverlay();
+          seekExact(visual.start);
           setTimeout(() => {
-            const play = q('poiHybridPlay');
+            const play = el('poiHybridPlay');
             if (play && !play.textContent?.includes('❚')) play.click();
           }, 120);
         }
@@ -199,9 +209,12 @@
   }
 
   function bindNavigation() {
-    document.addEventListener('click', event => {
-      const next = event.target.closest?.('#poiHybridNext');
-      const previous = event.target.closest?.('#poiHybridPrev');
+    // V6.8 listens on document capture. Window capture is deliberately used here
+    // so the corrected navigation owns next/previous before the old bridge can
+    // perform its click-based audio handoff.
+    window.addEventListener('click', event => {
+      const next = event.target?.closest?.('#poiHybridNext');
+      const previous = event.target?.closest?.('#poiHybridPrev');
       if (!next && !previous) return;
       const direction = next ? 1 : -1;
       event.preventDefault();
@@ -214,9 +227,10 @@
         const visual = direction > 0 ? nextVisual(second) : previousVisual(second);
         if (!visual) return;
         const wasPlaying = hybridPlaying();
+        hideAudioOverlay();
         seekExact(visual.start);
         if (wasPlaying) setTimeout(() => {
-          const play = q('poiHybridPlay');
+          const play = el('poiHybridPlay');
           if (play && !play.textContent?.includes('❚')) play.click();
         }, 120);
       })();
@@ -224,10 +238,10 @@
   }
 
   function bindAudioTrackClicks() {
-    document.addEventListener('click', event => {
-      const audio = event.target.closest?.('#poiV66AudioTrack [data-audio-id]');
-      if (!audio) return;
-      const session = audioSessions().find(item => Number(item.id) === Number(audio.dataset.audioId));
+    window.addEventListener('click', event => {
+      const target = event.target?.closest?.('#poiV66AudioTrack [data-audio-id]');
+      if (!target) return;
+      const session = audioSessions().find(item => Number(item.id) === Number(target.dataset.audioId));
       if (!session) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -236,20 +250,20 @@
   }
 
   function invalidate() {
-    state69.analysis = null;
-    state69.day = null;
-    state69.key = '';
-    if (state69.audioTimer) clearTimeout(state69.audioTimer);
-    state69.audioTimer = null;
+    S.analysis = null;
+    S.day = null;
+    S.key = '';
+    if (S.audioTimer) clearTimeout(S.audioTimer);
+    S.audioTimer = null;
   }
 
   function bindInvalidation() {
-    ['poiTimelineCamera', 'poiTimelineDate'].forEach(id => q(id)?.addEventListener('change', invalidate));
-    q('poiTimelineRefresh')?.addEventListener('click', invalidate);
+    ['poiTimelineCamera', 'poiTimelineDate'].forEach(id => el(id)?.addEventListener('change', invalidate));
+    el('poiTimelineRefresh')?.addEventListener('click', invalidate);
   }
 
   function install() {
-    if (!q('poiTimelinePlayer') || !q('poiV66AudioTrack')) return false;
+    if (!el('poiTimelinePlayer') || !el('poiV66AudioTrack') || !el('poiV66AudioOverlay')) return false;
     if (document.documentElement.dataset.poiV69Bound === '1') return true;
     document.documentElement.dataset.poiV69Bound = '1';
     bindNavigation();
@@ -263,7 +277,7 @@
     let attempts = 0;
     const timer = setInterval(() => {
       attempts += 1;
-      if (install() || attempts > 100) clearInterval(timer);
+      if (install() || attempts > 120) clearInterval(timer);
     }, 100);
   }
 })();
