@@ -66,6 +66,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "Dependencias da V5 nao estao compativeis."
 }
 
+# Reuse the same FFmpeg binary already supplied by imageio-ffmpeg for go2rtc's
+# lazy browser transcoding. This avoids requiring a system-wide ffmpeg.exe or
+# relying on Windows PATH/exec quoting.
+$Go2rtcFfmpegExe = (& $PythonExe -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())").Trim()
+if ([string]::IsNullOrWhiteSpace($Go2rtcFfmpegExe) -or -not (Test-Path $Go2rtcFfmpegExe)) {
+    throw "FFmpeg do imageio-ffmpeg nao foi encontrado para o go2rtc."
+}
+$Go2rtcFfmpegYaml = ($Go2rtcFfmpegExe -replace '\\','/').Replace("'", "''")
+
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
 
@@ -114,21 +123,24 @@ if (Test-Path $SearxngBootstrap) {
     }
 }
 
-$runtimeYaml = @'
+$runtimeYaml = @"
 api:
   listen: ":1984"
 rtsp:
   listen: ":8554"
 webrtc:
   listen: ":8555"
+ffmpeg:
+  bin: '$Go2rtcFfmpegYaml'
 streams: {}
 log:
   level: info
-'@
+"@
 [System.IO.File]::WriteAllText($RuntimeConfig, $runtimeYaml, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host "=== PersonOfInterest V5 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
+Write-Host "go2rtc FFmpeg: $Go2rtcFfmpegExe" -ForegroundColor DarkGray
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
 $Backend = $null
