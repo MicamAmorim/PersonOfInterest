@@ -56,6 +56,13 @@
       link.dataset.poiV66 = '1';
       document.head.appendChild(link);
     }
+    if (!document.querySelector('link[data-poi-v67]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/v67-timeline-overlay-layout.css';
+      link.dataset.poiV67 = '1';
+      document.head.appendChild(link);
+    }
     if (!document.querySelector('script[data-poi-v50]')) {
       const script = document.createElement('script');
       script.src = '/v50-persistent.js';
@@ -124,6 +131,13 @@
       script.src = '/v66-event-overlay-audio-track.js';
       script.defer = true;
       script.dataset.poiV66 = '1';
+      document.body.appendChild(script);
+    }
+    if (!document.querySelector('script[data-poi-v67]')) {
+      const script = document.createElement('script');
+      script.src = '/v67-timeline-overlay-layout.js';
+      script.defer = true;
+      script.dataset.poiV67 = '1';
       document.body.appendChild(script);
     }
   }
