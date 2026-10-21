@@ -6,6 +6,7 @@
     loading: null,
     observer: null,
     lastSecond: null,
+    navToken: 0,
   };
 
   const el = id => document.getElementById(id);
@@ -26,11 +27,28 @@
     return Boolean(el('poiTimelineShowFp')?.checked);
   }
 
+  function hybridPlaying() {
+    const play = el('poiHybridPlay');
+    const video = el('poiTimelineVideo');
+    return Boolean(play?.textContent?.includes('❚') || (video && !video.hidden && !video.paused && !video.ended));
+  }
+
   function falsePositiveIds() {
     return new Set((S.day?.events || [])
       .filter(item => String(item.identity_state || '') === 'false_positive')
       .map(item => Number(item.id))
       .filter(Number.isFinite));
+  }
+
+  function recordingById(id) {
+    return (S.day?.recordings || []).find(item => Number(item.id) === Number(id)) || null;
+  }
+
+  function isHiddenFalsePositiveRecording(rec, ids = falsePositiveIds()) {
+    if (!rec || showFalsePositives()) return false;
+    return String(rec.mode || '') === 'event'
+      && Number(rec.source_event_id || 0) > 0
+      && ids.has(Number(rec.source_event_id));
   }
 
   async function loadData(force = false) {
@@ -85,24 +103,43 @@
     return null;
   }
 
-  function clearHiddenSelection(ids) {
-    const selected = selectedEventId();
+  function hideVisualEventArtifacts() {
     const overlay = el('poiV63EventOverlay');
     const bbox = el('poiV66BBox');
     const classify = el('poiTimelineClassify');
+    if (overlay) overlay.hidden = true;
+    if (bbox) bbox.hidden = true;
+    if (classify) {
+      classify.hidden = true;
+      delete classify.dataset.eventId;
+    }
+  }
+
+  function clearHiddenSelection(ids) {
+    const selected = selectedEventId();
     const overlaySaysFp = String(el('poiV63OverlayLabel')?.textContent || '').trim().toLowerCase() === 'falso positivo';
     if ((selected && ids.has(selected)) || overlaySaysFp) {
       document.querySelectorAll('.selected[data-event-id], .selected[data-event-card]').forEach(node => {
         const id = Number(node.dataset.eventId || node.dataset.eventCard || 0);
         if (ids.has(id)) node.classList.remove('selected');
       });
-      if (overlay) overlay.hidden = true;
-      if (bbox) bbox.hidden = true;
-      if (classify) {
-        classify.hidden = true;
-        delete classify.dataset.eventId;
-      }
+      hideVisualEventArtifacts();
     }
+  }
+
+  function clearHiddenCurrentRecording(ids) {
+    const video = el('poiTimelineVideo');
+    if (!video || video.hidden) return;
+    const rec = recordingById(video.dataset.recordingId);
+    if (!isHiddenFalsePositiveRecording(rec, ids)) return;
+    try { video.pause(); } catch (_) {}
+    video.hidden = true;
+    const snapshot = el('poiTimelineSnapshot');
+    if (snapshot) snapshot.hidden = true;
+    const empty = el('poiTimelineEmpty');
+    if (empty) empty.hidden = false;
+    const title = el('poiMediaTitle');
+    if (title) title.textContent = 'Sem mídia visível neste horário';
   }
 
   function applyFilter() {
@@ -121,7 +158,25 @@
         setFiltered(node, filtering && id > 0 && ids.has(id));
       });
     }
-    if (filtering) clearHiddenSelection(ids);
+
+    document.querySelectorAll('#poiCoverageTrack [data-recording-id]').forEach(node => {
+      const rec = recordingById(node.dataset.recordingId);
+      setFiltered(node, filtering && isHiddenFalsePositiveRecording(rec, ids));
+    });
+
+    if (filtering) {
+      clearHiddenSelection(ids);
+      clearHiddenCurrentRecording(ids);
+    }
+  }
+
+  function playbackSecond() {
+    const video = el('poiTimelineVideo');
+    if (video && !video.hidden) {
+      const rec = recordingById(video.dataset.recordingId);
+      if (rec) return Number(rec.start_second || 0) + Number(video.currentTime || 0);
+    }
+    return Number(el('poiDayScrubber')?.value || 0);
   }
 
   function latestCrossedEvent(last, now) {
@@ -132,22 +187,33 @@
     return crossed.length ? crossed[crossed.length - 1] : null;
   }
 
+  function syncPreciseScrubber(second) {
+    const scrubber = el('poiDayScrubber');
+    if (!scrubber || document.activeElement === scrubber) return;
+    scrubber.step = '0.01';
+    const max = Number(scrubber.max || S.day?.day_duration_seconds || 86400);
+    const value = Math.max(0, Math.min(max, Number(second) || 0));
+    scrubber.value = String(value);
+  }
+
   function bindVideoGuard() {
     const video = el('poiTimelineVideo');
     if (!video || video.dataset.poiV73FpBound === '1') return;
     video.dataset.poiV73FpBound = '1';
     video.addEventListener('timeupdate', () => {
-      const now = Number(el('poiDayScrubber')?.value || 0);
+      const now = playbackSecond();
+      syncPreciseScrubber(now);
       const latest = latestCrossedEvent(S.lastSecond, now);
       S.lastSecond = now;
       if (showFalsePositives() || !latest || String(latest.identity_state || '') !== 'false_positive') return;
-      const bbox = el('poiV66BBox');
-      if (bbox) bbox.hidden = true;
-      const overlay = el('poiV63EventOverlay');
-      if (String(el('poiV63OverlayLabel')?.textContent || '').trim().toLowerCase() === 'falso positivo' && overlay) overlay.hidden = true;
+      document.querySelectorAll('.selected[data-event-id], .selected[data-event-card]').forEach(node => {
+        const id = Number(node.dataset.eventId || node.dataset.eventCard || 0);
+        if (id === Number(latest.id)) node.classList.remove('selected');
+      });
+      hideVisualEventArtifacts();
     });
     video.addEventListener('seeking', () => {
-      S.lastSecond = Number(el('poiDayScrubber')?.value || 0);
+      S.lastSecond = playbackSecond();
     });
   }
 
@@ -155,7 +221,7 @@
     const ids = falsePositiveIds();
     const recordings = (S.day?.recordings || [])
       .filter(rec => rec.file_url && Number(rec.end_second) > Number(rec.start_second))
-      .filter(rec => includeFalsePositives || rec.mode !== 'event' || !rec.source_event_id || !ids.has(Number(rec.source_event_id)))
+      .filter(rec => includeFalsePositives || String(rec.mode || '') !== 'event' || !rec.source_event_id || !ids.has(Number(rec.source_event_id)))
       .map(rec => ({
         type: 'visual',
         start: Number(rec.start_second || 0),
@@ -201,65 +267,116 @@
     return Number(item?.event?.id || item?.rec?.source_event_id || 0) || null;
   }
 
-  function isHiddenFalsePositive(item) {
-    if (!item || item.type !== 'visual' || showFalsePositives()) return false;
-    const id = itemEventId(item);
-    return Boolean(id && falsePositiveIds().has(id));
+  function safeTemporalSecond(item) {
+    const start = Number(item?.start || 0);
+    const end = Number(item?.end || start);
+    if (item?.rec && end > start) {
+      const margin = Math.min(.08, Math.max(.01, (end - start) / 4));
+      return Math.min(end - .005, start + margin);
+    }
+    if (item?.type === 'audio') return start + .01;
+    return start;
   }
 
   function seekExact(second) {
     const scrubber = el('poiDayScrubber');
     if (!scrubber) return;
+    scrubber.step = '0.01';
     const max = Number(scrubber.max || S.day?.day_duration_seconds || 86400);
-    scrubber.value = String(Math.max(0, Math.min(max, Math.round(Number(second) || 0))));
+    const value = Math.max(0, Math.min(max, Number(second) || 0));
+    scrubber.value = String(value);
     scrubber.dispatchEvent(new Event('input', { bubbles: true }));
     scrubber.dispatchEvent(new Event('change', { bubbles: true }));
+    requestAnimationFrame(() => {
+      if (document.activeElement !== scrubber) scrubber.value = String(value);
+    });
   }
 
-  function focusFilteredTarget(item) {
+  function syncEventSelection(eventId) {
+    const id = Number(eventId || 0) || null;
+    const selectors = [
+      '#poiV63ClipTrack [data-event-id]',
+      '#poiV63EventTrack [data-event-id]',
+      '#poiEventMarkers [data-event-id]',
+      '#poiEventStrip [data-event-card]',
+    ];
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach(node => {
+        const nodeId = Number(node.dataset.eventId || node.dataset.eventCard || 0);
+        node.classList.toggle('selected', Boolean(id && nodeId === id && !node.hidden));
+      });
+    }
+    const classify = el('poiTimelineClassify');
+    if (classify) {
+      classify.hidden = !id;
+      if (id) classify.dataset.eventId = String(id);
+      else delete classify.dataset.eventId;
+    }
+  }
+
+  function resumeHybridSoon() {
+    setTimeout(() => {
+      const play = el('poiHybridPlay');
+      if (play && !play.textContent?.includes('❚')) play.click();
+    }, 120);
+  }
+
+  function focusTemporalTarget(item, { resume = false } = {}) {
     if (!item) return;
     if (item.type === 'audio') {
       const button = document.querySelector(`#poiV66AudioTrack [data-audio-id="${Number(item.session?.id)}"]`);
       if (button) {
         button.click();
+        requestAnimationFrame(() => seekExact(safeTemporalSecond(item)));
         return;
       }
-      seekExact(item.start);
+      seekExact(safeTemporalSecond(item));
       return;
     }
+
     const eventId = itemEventId(item);
-    if (eventId) {
-      const button = document.querySelector(`#poiV63ClipTrack [data-event-id="${eventId}"]:not([hidden]), #poiV63EventTrack [data-event-id="${eventId}"]:not([hidden]), #poiEventStrip [data-event-card="${eventId}"]:not([hidden])`);
-      if (button) {
-        button.click();
-        return;
-      }
-    }
-    seekExact(item.start);
+    syncEventSelection(eventId);
+    const audioOverlay = el('poiV66AudioOverlay');
+    if (audioOverlay) audioOverlay.hidden = true;
+    seekExact(safeTemporalSecond(item));
+    if (resume) resumeHybridSoon();
+  }
+
+  async function jumpTemporal(direction) {
+    const token = ++S.navToken;
+    await loadData(false);
+    if (token !== S.navToken || !S.day || !S.analysis) return;
+    const items = temporalItems(showFalsePositives());
+    const current = Number(el('poiDayScrubber')?.value || 0);
+    const target = temporalTarget(items, current, direction);
+    if (!target) return;
+    const wasPlaying = hybridPlaying();
+    focusTemporalTarget(target, { resume: wasPlaying });
   }
 
   function bindNavigationGuard() {
     if (window.__poiV73FpNavigationBound) return;
     window.__poiV73FpNavigationBound = true;
     window.addEventListener('click', event => {
-      if (!timelineActive() || showFalsePositives() || !S.day || !S.analysis) return;
+      if (!timelineActive()) return;
       const next = event.target?.closest?.('#poiHybridNext');
       const previous = event.target?.closest?.('#poiHybridPrev');
       if (!next && !previous) return;
-      const direction = next ? 1 : -1;
-      const current = Number(el('poiDayScrubber')?.value || 0);
-      const rawTarget = temporalTarget(temporalItems(true), current, direction);
-      if (!isHiddenFalsePositive(rawTarget)) return;
-      const visibleTarget = temporalTarget(temporalItems(false), current, direction);
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (visibleTarget) focusFilteredTarget(visibleTarget);
+      void jumpTemporal(next ? 1 : -1);
     }, true);
   }
 
   function observeRenders() {
     if (S.observer) return;
-    const targets = [el('poiV63ClipTrack'), el('poiV63EventTrack'), el('poiEventMarkers'), el('poiEventStrip')].filter(Boolean);
+    const targets = [
+      el('poiV63ClipTrack'),
+      el('poiV63EventTrack'),
+      el('poiEventMarkers'),
+      el('poiEventStrip'),
+      el('poiCoverageTrack'),
+    ].filter(Boolean);
     if (!targets.length) return;
     S.observer = new MutationObserver(() => requestAnimationFrame(applyFilter));
     targets.forEach(target => S.observer.observe(target, { childList: true }));
@@ -270,6 +387,7 @@
     S.analysis = null;
     S.key = '';
     S.lastSecond = null;
+    S.navToken += 1;
   }
 
   function bindControls() {
@@ -291,6 +409,8 @@
 
   function init() {
     if (!el('poiTimelinePlayer')) return false;
+    const scrubber = el('poiDayScrubber');
+    if (scrubber) scrubber.step = '0.01';
     bindControls();
     bindVideoGuard();
     bindNavigationGuard();
