@@ -168,6 +168,13 @@
       script.dataset.poiV70 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v72-live]')) {
+      const script = document.createElement('script');
+      script.src = '/v72-live-browser-compat.js?v=7.2.2';
+      script.defer = true;
+      script.dataset.poiV72Live = '1';
+      document.body.appendChild(script);
+    }
   }
 
   function install() {
