@@ -32,5 +32,6 @@ def test_timeline_analysis_prefers_trigger_time_bbox() -> None:
     api = (ROOT / "backend" / "app" / "timeline_analysis_api.py").read_text(encoding="utf-8")
     assert "track_observations" in api
     assert "trigger_bbox_json" in api
-    assert "julianday(t.created_at)" in api
+    assert "ORDER BY t.created_at ASC, t.id ASC" in api
+    assert "julianday(t.created_at)" not in api
     assert '"bbox": trigger_bbox or display_bbox' in api
