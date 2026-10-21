@@ -31,6 +31,7 @@ from .recording_preroll_patch import install as _install_recording_preroll_patch
 from .reference_curator_patch import install as _install_reference_curator_patch
 from .snapshot_display_patch import install as _install_snapshot_display_patch
 from .storage_recording_patch import install as _install_storage_recording_patch
+from .timeline_analysis_patch import install as _install_timeline_analysis_patch
 from .tracking_v5_patch import install as _install_tracking_v5_patch
 from .spatial_vision_patch import install as _install_spatial_vision_patch
 
@@ -104,6 +105,9 @@ _install_recording_preroll_patch()
 # Storage/recording are accessory services. They wrap DB startup/shutdown only;
 # detection, tracking and ReID remain owners of their existing lifecycle.
 _install_storage_recording_patch()
+# Timeline analysis is read-only: expose persisted event BBs and Tonho wake
+# sessions without changing vision, ReID, recording or assistant behavior.
+_install_timeline_analysis_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
@@ -140,5 +144,6 @@ del _install_recording_preroll_patch
 del _install_reference_curator_patch
 del _install_snapshot_display_patch
 del _install_storage_recording_patch
+del _install_timeline_analysis_patch
 del _install_tracking_v5_patch
 del _install_spatial_vision_patch
