@@ -6,6 +6,9 @@ from typing import Any
 
 
 def install() -> None:
+    from .native_fault_guard import install as install_native_fault_guard
+    install_native_fault_guard()
+
     from . import api_v34
     from .session_diagnostics_api import manager, router as diagnostics_router
 
