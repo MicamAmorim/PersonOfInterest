@@ -66,13 +66,20 @@ def browser_compatible_path(recording_id: int, source: Path) -> Path:
 
     H.264 MP4 files are returned unchanged. HEVC/H.265 (and unknown video
     codecs) are transcoded lazily once and cached using source size/mtime as the
-    cache key, so subsequent byte-range requests are normal FileResponses.
+    cache key. Cache lookup happens before codec probing so subsequent byte-range
+    requests stay cheap and behave like a normal static MP4.
     """
     try:
         source = source.resolve(strict=True)
         stat = source.stat()
     except OSError:
         return source
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    fingerprint = f"{int(recording_id)}_{stat.st_size}_{stat.st_mtime_ns}"
+    target = CACHE_DIR / f"recording_{fingerprint}_h264.mp4"
+    if target.is_file() and target.stat().st_size > 0:
+        return target
 
     codec = video_codec(source)
     if codec in {"h264", "avc1"}:
@@ -81,12 +88,6 @@ def browser_compatible_path(recording_id: int, source: Path) -> Path:
     ffmpeg = _ffmpeg_executable()
     if not ffmpeg:
         return source
-
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    fingerprint = f"{int(recording_id)}_{stat.st_size}_{stat.st_mtime_ns}"
-    target = CACHE_DIR / f"recording_{fingerprint}_h264.mp4"
-    if target.is_file() and target.stat().st_size > 0:
-        return target
 
     lock = _lock_for(fingerprint)
     with lock:
