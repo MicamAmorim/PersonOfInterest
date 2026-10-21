@@ -48,7 +48,7 @@ self.addEventListener('push', (event) => {
   };
   if (data.image) options.image = data.image;
   event.waitUntil(Promise.all([
-    self.registration.showNotification(title, options.image ? options : options),
+    self.registration.showNotification(title, options),
     self.navigator?.setAppBadge ? self.navigator.setAppBadge() : Promise.resolve(),
   ]));
 });
