@@ -7,12 +7,13 @@ def browser_stream_name(stream_name: str) -> str:
     return f"{stream_name}_browser"
 
 
-def browser_stream_source(stream_name: str) -> str:
-    # Native go2rtc FFmpeg source. go2rtc can use another go2rtc stream name as
-    # FFmpeg input and starts the transcoder lazily only when the derived stream
-    # is consumed. This avoids Windows exec:/quoting issues and guarantees the
-    # browser path exposes H.264 video + Opus audio.
-    return f"ffmpeg:{stream_name}#video=h264#audio=opus"
+def browser_stream_source(stream_name: str, local_restream_url) -> str:
+    # Use the primary go2rtc stream through its explicit local RTSP endpoint.
+    # This avoids any ambiguity in logical stream-name resolution inside the
+    # FFmpeg module. Only video is transcoded; the camera's PCMA audio is copied
+    # unchanged (WebRTC supports PCMA), avoiding an unnecessary Opus encoder.
+    source = local_restream_url(stream_name)
+    return f"ffmpeg:{source}#video=h264#audio=copy"
 
 
 def install() -> None:
@@ -27,7 +28,7 @@ def install() -> None:
     def ensure_browser_stream(stream_name: str) -> Any:
         return original_upsert(
             browser_stream_name(stream_name),
-            browser_stream_source(stream_name),
+            browser_stream_source(stream_name, go2rtc.local_restream_url),
         )
 
     def upsert_stream(
