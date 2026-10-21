@@ -112,6 +112,13 @@
       script.dataset.poiV64 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v65]')) {
+      const script = document.createElement('script');
+      script.src = '/v65-person-picker-hotfix.js';
+      script.defer = true;
+      script.dataset.poiV65 = '1';
+      document.body.appendChild(script);
+    }
   }
 
   function install() {
