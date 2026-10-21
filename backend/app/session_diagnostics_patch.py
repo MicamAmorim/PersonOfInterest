@@ -11,10 +11,14 @@ def install() -> None:
 
     from . import api_v34
     from .session_diagnostics_api import manager, router as diagnostics_router
+    from .session_diagnostics_v71_patch import router as diagnostics_v71_router
 
     if not getattr(api_v34.router, "_poi_session_diagnostics_routes", False):
         api_v34.router.include_router(diagnostics_router)
         api_v34.router._poi_session_diagnostics_routes = True  # type: ignore[attr-defined]
+    if not getattr(api_v34.router, "_poi_session_diagnostics_v71_routes", False):
+        api_v34.router.include_router(diagnostics_v71_router)
+        api_v34.router._poi_session_diagnostics_v71_routes = True  # type: ignore[attr-defined]
 
     if getattr(threading, "_poi_session_diagnostics_hook", False):
         return
