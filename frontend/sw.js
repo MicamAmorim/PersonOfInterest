@@ -1,10 +1,10 @@
-const CACHE = 'personofinterest-v6.5.1-picker-root-fix';
+const CACHE = 'personofinterest-v6.6-event-overlay-tonho-track';
 const SHELL = [
   '/', '/styles.css', '/v2.css', '/v34.css', '/v48-spatial.css',
-  '/v50-persistent.css', '/v52-library-viewer.css', '/v53-doorbell.css', '/v54-pwa.css', '/v55-mobile-dashboard.css', '/v56-viewer-ux.css', '/v58-storage-recording.css', '/v60-timeline-player.css', '/v61-timeline-interactions.css', '/v62-hybrid-playback.css', '/v63-timeline-tracks.css', '/v64-playback-picker-fixes.css',
+  '/v50-persistent.css', '/v52-library-viewer.css', '/v53-doorbell.css', '/v54-pwa.css', '/v55-mobile-dashboard.css', '/v56-viewer-ux.css', '/v58-storage-recording.css', '/v60-timeline-player.css', '/v61-timeline-interactions.css', '/v62-hybrid-playback.css', '/v63-timeline-tracks.css', '/v64-playback-picker-fixes.css', '/v66-event-overlay-audio-track.css',
   '/app-core.js', '/app-runtime.js', '/v34.js', '/v4-stream-fix.js', '/v4-audio-fix.js',
   '/v42-assistant.js', '/v48-spatial-alerts.js', '/v49-identity-diagnostics.js',
-  '/v50-persistent.js', '/v51-live-overlay.js', '/v52-library-viewer.js', '/v53-doorbell.js', '/v54-pwa.js', '/v55-mobile-dashboard.js', '/v56-viewer-ux.js', '/v57-device-push.js', '/v58-storage-recording.js', '/v59-db-maintenance.js', '/v60-timeline-player.js', '/v61-timeline-interactions.js', '/v62-hybrid-playback.js', '/v63-timeline-tracks.js', '/v64-playback-picker-fixes.js',
+  '/v50-persistent.js', '/v51-live-overlay.js', '/v52-library-viewer.js', '/v53-doorbell.js', '/v54-pwa.js', '/v55-mobile-dashboard.js', '/v56-viewer-ux.js', '/v57-device-push.js', '/v58-storage-recording.js', '/v59-db-maintenance.js', '/v60-timeline-player.js', '/v61-timeline-interactions.js', '/v62-hybrid-playback.js', '/v63-timeline-tracks.js', '/v64-playback-picker-fixes.js', '/v66-event-overlay-audio-track.js',
   '/camera-webrtc.html', '/tonho-lab.html', '/manifest.webmanifest', '/icon.svg'
 ];
 
