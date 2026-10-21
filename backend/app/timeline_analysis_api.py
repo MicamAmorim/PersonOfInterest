@@ -76,17 +76,16 @@ def timeline_analysis(
             raise HTTPException(status_code=404, detail="Câmera não encontrada")
 
         # events.bbox_json follows the best display snapshot and may therefore be
-        # updated later in a track. For video overlays we need the box closest to
-        # the event trigger time. track_observations already stores that temporal
-        # history, so prefer the nearest observation and keep bbox_json as a
-        # backward-compatible fallback for older databases/events.
+        # updated later in a track. For video overlays we need the trigger-time box.
+        # The first observation persisted for an event is the closest available
+        # observation to that event's trigger and avoids a SQLite correlated ORDER BY
+        # that cannot reliably reference the outer alias on all supported versions.
         if _table_exists(conn, "track_observations"):
             trigger_bbox_select = """
                 (SELECT t.bbox_json
                  FROM track_observations t
                  WHERE t.event_id = e.id
-                 ORDER BY ABS((julianday(t.created_at) - julianday(e.created_at)) * 86400.0) ASC,
-                          t.id ASC
+                 ORDER BY t.created_at ASC, t.id ASC
                  LIMIT 1) AS trigger_bbox_json,
             """
         else:
