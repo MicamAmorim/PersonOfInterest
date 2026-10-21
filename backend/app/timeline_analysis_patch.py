@@ -7,9 +7,11 @@ def install() -> None:
     # gain a lazy H.264/Opus fallback only when needed.
     from .browser_stream_patch import install as install_browser_stream_patch
     from .browser_media_route_patch import install as install_browser_media_route_patch
+    from .browser_ws_authorization_patch import install as install_browser_ws_authorization_patch
 
     install_browser_stream_patch()
     install_browser_media_route_patch()
+    install_browser_ws_authorization_patch()
 
     # Install this late, after V5 tracking/manual-integrity have finished wrapping
     # IdentityManager. It closes the race where an in-flight face worker can
