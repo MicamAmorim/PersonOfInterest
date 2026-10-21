@@ -161,7 +161,6 @@
         start: Number(rec.start_second || 0),
         end: Number(rec.end_second || 0),
         rec,
-        hiddenFalsePositive: !includeFalsePositives && rec.source_event_id && ids.has(Number(rec.source_event_id)),
       }));
     const events = (S.day?.events || [])
       .filter(event => includeFalsePositives || !ids.has(Number(event.id)))
@@ -172,7 +171,6 @@
         start: Number(event.second || 0),
         end: Number(event.second || 0),
         event,
-        hiddenFalsePositive: !includeFalsePositives && ids.has(Number(event.id)),
       }));
     return [...recordings, ...events].sort((a, b) => a.start - b.start);
   }
@@ -184,7 +182,6 @@
       start: Number(session.start_second || 0),
       end: Math.max(Number(session.end_second || session.start_second || 0), Number(session.start_second || 0) + 4),
       session,
-      hiddenFalsePositive: false,
     }));
     return [...visual, ...audio].sort((a, b) => {
       const delta = Number(a.start) - Number(b.start);
@@ -292,14 +289,13 @@
     });
   }
 
-  async function init() {
+  function init() {
     if (!el('poiTimelinePlayer')) return false;
     bindControls();
     bindVideoGuard();
     bindNavigationGuard();
     observeRenders();
-    await loadData(true);
-    applyFilter();
+    void loadData(true).then(applyFilter);
     return true;
   }
 
@@ -308,10 +304,7 @@
     let attempts = 0;
     const timer = setInterval(() => {
       attempts += 1;
-      if (el('poiTimelinePlayer')) {
-        clearInterval(timer);
-        void init();
-      } else if (attempts > 120) clearInterval(timer);
+      if (init() || attempts > 120) clearInterval(timer);
     }, 100);
   }
 })();
