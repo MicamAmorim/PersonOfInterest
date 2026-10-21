@@ -32,6 +32,10 @@ def _command_line(args: list[str]) -> str:
     return shlex.join(args)
 
 
+def browser_stream_name(stream_name: str) -> str:
+    return f"{stream_name}_browser"
+
+
 def _browser_exec_source(rtsp_url: str) -> str | None:
     ffmpeg = _ffmpeg_executable()
     if not ffmpeg:
@@ -69,6 +73,7 @@ def install() -> None:
         return
 
     original_upsert = go2rtc.upsert_stream
+    original_delete = go2rtc.delete_stream
 
     def upsert_stream(
         stream_name: str,
@@ -76,29 +81,32 @@ def install() -> None:
         extra_sources: Any = None,
     ) -> Any:
         result = original_upsert(stream_name, rtsp_url, extra_sources)
-        if not result.ok or stream_name.endswith("_talkback"):
+        if not result.ok or stream_name.endswith(("_talkback", "_browser")):
             return result
 
-        # Keep the camera's original RTSP/HEVC producer first so vision,
-        # recording and other RTSP consumers continue using the untouched
-        # source. Add an H.264/Opus producer to the *same* go2rtc stream. go2rtc
-        # starts this exec producer lazily only when a browser asks for codecs
-        # the original camera cannot provide (typically HEVC -> H.264 WebRTC).
-        browser_source = _browser_exec_source(rtsp_url)
-        if not browser_source:
-            result.warning = "FFmpeg local indisponível para fallback H.264 do navegador"
+        # Browser playback must be deterministic. Keep the primary camera stream
+        # untouched for vision/recording, and expose a separate lazy H.264/Opus
+        # stream whose FFmpeg input is go2rtc's local RTSP restream. This avoids
+        # opening a second direct connection to the physical camera while also
+        # preventing stream.html from selecting the original HEVC producer.
+        source = _browser_exec_source(go2rtc.local_restream_url(stream_name))
+        if not source:
+            result.warning = "FFmpeg local indisponível para stream H.264 do navegador"
             return result
-        try:
-            go2rtc._request(  # type: ignore[attr-defined]
-                "PUT",
-                "/api/streams",
-                {"name": stream_name, "src": [rtsp_url, browser_source]},
-            )
-        except Exception as exc:
-            # The original stream is already valid; browser fallback failure must
-            # never take vision/recording offline.
-            result.warning = f"Fallback H.264 do navegador indisponível: {exc}"
+        browser_result = original_upsert(browser_stream_name(stream_name), source)
+        if not browser_result.ok:
+            result.warning = f"Stream H.264 do navegador indisponível: {browser_result.error}"
         return result
 
+    def delete_stream(stream_name: str) -> Any:
+        if not stream_name.endswith(("_talkback", "_browser")):
+            try:
+                original_delete(browser_stream_name(stream_name))
+            except Exception:
+                pass
+        return original_delete(stream_name)
+
+    go2rtc.browser_stream_name = browser_stream_name  # type: ignore[attr-defined]
     go2rtc.upsert_stream = upsert_stream
+    go2rtc.delete_stream = delete_stream
     go2rtc._poi_browser_stream_patch = True  # type: ignore[attr-defined]
