@@ -27,6 +27,7 @@ from .identity_safety_patch import install as _install_identity_safety_patch
 from .manual_integrity_v5_patch import install as _install_manual_integrity_v5_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
+from .recording_preroll_patch import install as _install_recording_preroll_patch
 from .reference_curator_patch import install as _install_reference_curator_patch
 from .snapshot_display_patch import install as _install_snapshot_display_patch
 from .storage_recording_patch import install as _install_storage_recording_patch
@@ -96,6 +97,10 @@ _install_doorbell_patch()
 # Notification pause is scoped to the current browser Push endpoint only; it
 # never disables global alert rules or another phone/PC subscription.
 _install_device_push_pause_patch()
+# Event-mode recording keeps a rolling stream-copy ring buffer so each clip can
+# include half of its configured duration before the triggering event. Install
+# this before storage_recording_patch so disk-guard wrapping remains authoritative.
+_install_recording_preroll_patch()
 # Storage/recording are accessory services. They wrap DB startup/shutdown only;
 # detection, tracking and ReID remain owners of their existing lifecycle.
 _install_storage_recording_patch()
@@ -131,6 +136,7 @@ del _install_identity_safety_patch
 del _install_manual_integrity_v5_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
+del _install_recording_preroll_patch
 del _install_reference_curator_patch
 del _install_snapshot_display_patch
 del _install_storage_recording_patch
