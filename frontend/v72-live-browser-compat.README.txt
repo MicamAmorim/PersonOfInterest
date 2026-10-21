@@ -1,0 +1,1 @@
+V7.2.2 routes all browser-facing live surfaces through camera-webrtc.html and the dedicated *_browser H.264/Opus go2rtc stream. The original camera stream remains reserved for vision, recording and backend consumers.
