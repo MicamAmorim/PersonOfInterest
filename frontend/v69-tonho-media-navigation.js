@@ -133,10 +133,8 @@
   }
 
   function previousTemporal(second) {
-    const t = Number(second) || 0;
-    const activeVisual = visualAt(t);
-    if (activeVisual?.rec && t - Number(activeVisual.start) > 2) return activeVisual;
-    const items = temporalItems().filter(item => Number(item.start) < t - .35);
+    const threshold = Number(second) - .35;
+    const items = temporalItems().filter(item => Number(item.start) < threshold);
     return items.length ? items[items.length - 1] : null;
   }
 
