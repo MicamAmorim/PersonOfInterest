@@ -1,40 +1,46 @@
 from pathlib import Path
 
 
-def test_v73_filters_all_false_positive_timeline_artifacts():
+def test_v73_filters_false_positive_artifacts_and_event_clips():
     text = Path('frontend/v73-false-positive-timeline-filter.js').read_text(encoding='utf-8')
     assert "state === 'false_positive'" in text
     assert "label === 'falso positivo'" in text
-    assert "#poiTimelinePlayer [data-event-id]" in text
+    assert '#poiTimelinePlayer [data-event-id]' in text
     assert '#poiEventStrip [data-event-card]' in text
     assert '#poiCoverageTrack [data-recording-id]' in text
     assert 'isHiddenFalsePositiveRecording' in text
     assert 'clearHiddenCurrentRecording' in text
     assert 'poiV66BBox' in text
-    assert 'subtree: true' in text
-    assert "attributeFilter: ['hidden', 'class', 'style', 'data-event-id', 'data-event-card', 'data-recording-id']" in text
 
 
-def test_v73_previous_next_are_index_based_and_symmetric():
+def test_v73_navigation_is_index_based_and_keeps_stable_media_key():
+    text = Path('frontend/v73-false-positive-timeline-filter.js').read_text(encoding='utf-8')
+    assert 'function itemKey' in text
+    assert 'function currentMediaKey' in text
+    assert 'function neighborByIndex' in text
+    assert 'items[index + direction]' in text
+    assert 'S.navKey = itemKey(item)' in text
+    assert 'jumpMediaDeterministic(next ? 1 : -1)' in text
+
+
+def test_v73_selects_exact_event_recording_before_moving_needle():
+    text = Path('frontend/v73-false-positive-timeline-filter.js').read_text(encoding='utf-8')
+    assert 'function exactEventNode' in text
+    assert 'function pinRecordingStart' in text
+    assert 'eventNode.click()' in text
+    assert 'Number(video.dataset.recordingId || 0) !== recId' in text
+    assert 'video.currentTime =' in text
+    assert 'syncNeedleOnly(second)' in text
+    needle_block = text[text.index('function syncNeedleOnly'):text.index('function seekFallback')]
+    assert "dispatchEvent(new Event('input'" in needle_block
+    assert "dispatchEvent(new Event('change'" not in needle_block
+
+
+def test_v73_owns_previous_next():
     text = Path('frontend/v73-false-positive-timeline-filter.js').read_text(encoding='utf-8')
     assert "event.target?.closest?.('#poiHybridNext')" in text
     assert "event.target?.closest?.('#poiHybridPrev')" in text
     assert 'event.stopImmediatePropagation()' in text
-    assert 'jumpMediaDeterministic' in text
-    assert 'neighborByIndex' in text
-    assert 'items[index + direction]' in text
-    assert 'currentMediaKey' in text
-    assert 'itemKey' in text
-    assert 'temporalTarget' not in text
-    assert ".35" not in text[text.index('function neighborByIndex'):text.index('function resumeHybridSoon')]
-
-
-def test_v73_seeks_to_real_media_start_without_integer_rounding():
-    text = Path('frontend/v73-false-positive-timeline-filter.js').read_text(encoding='utf-8')
-    assert "scrubber.step = '0.01'" in text
-    assert 'start + .02' in text
-    seek_block = text[text.index('function seekExact'):text.index('function syncEventSelection')]
-    assert 'Math.round' not in seek_block
 
 
 def test_v73_loads_before_v69_navigation_owner():
@@ -45,5 +51,5 @@ def test_v73_loads_before_v69_navigation_owner():
 
 def test_v73_cache_is_bumped_and_script_is_cached():
     text = Path('frontend/sw.js').read_text(encoding='utf-8')
-    assert "personofinterest-v7.3.2-deterministic-media-navigation" in text
+    assert "personofinterest-v7.3.3-exact-recording-navigation" in text
     assert '/v73-false-positive-timeline-filter.js' in text
