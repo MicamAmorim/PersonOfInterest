@@ -51,19 +51,39 @@
   }
 
   async function fetchPersons() {
-    const response = await fetch(`/api/persons?_=${Date.now()}`, {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json();
-    return Array.isArray(payload) ? payload : [];
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`/api/persons?_=${Date.now()}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      return Array.isArray(payload) ? payload : [];
+    } catch (error) {
+      if (error?.name === 'AbortError') throw new Error('tempo limite ao buscar pessoas');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   function hasNumericPersonOption(select) {
     return [...select.options].some(option => /^\d+$/.test(option.value) && Number(option.value) > 0);
+  }
+
+  function escaped(value = '') {
+    return String(value).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+  }
+
+  function currentPersonName() {
+    return document.getElementById('poiClassifyTitle')?.textContent?.replace(/\?$/, '').trim() || '';
   }
 
   async function populatePersonPicker(force = false) {
@@ -74,9 +94,13 @@
     const missingPeople = !hasNumericPersonOption(select);
     if (!force && !loading && !missingPeople && Date.now() - V64.personsLoadedAt < 5000) return;
     if (!force && Date.now() - V64.personsAttemptAt < 1800) return;
+
     V64.personsAttemptAt = Date.now();
     V64.personsLoading = true;
     const previous = select.value;
+    select.disabled = true;
+    select.innerHTML = '<option value="">Carregando pessoas…</option>';
+
     try {
       let persons = await fetchPersons();
       if (!persons.length) {
@@ -87,21 +111,57 @@
       const options = persons
         .filter(person => person && Number(person.id) > 0 && String(person.name || '').trim())
         .sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+
       select.innerHTML = '<option value="">Selecione uma pessoa…</option>' +
-        options.map(person => `<option value="${Number(person.id)}">${String(person.name).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}</option>`).join('') +
+        options.map(person => `<option value="${Number(person.id)}">${escaped(person.name)}</option>`).join('') +
         '<option value="new">＋ Novo nome…</option>';
+
+      const title = currentPersonName().toLowerCase();
+      const titleMatch = options.find(person => String(person.name || '').trim().toLowerCase() === title);
       if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
+      else if (titleMatch) select.value = String(titleMatch.id);
       else select.value = '';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      V64.personsLoadedAt = Date.now();
+
       select.dataset.poiV64Ready = options.length ? '1' : 'empty';
+      V64.personsLoadedAt = Date.now();
     } catch (error) {
       select.innerHTML = '<option value="">Falha ao carregar pessoas</option><option value="new">＋ Novo nome…</option>';
       select.dataset.poiV64Ready = '0';
       if (typeof toast === 'function') toast(`Pessoas: ${error.message}`, 'error');
     } finally {
+      select.disabled = false;
       V64.personsLoading = false;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     }
+  }
+
+  async function openPersonPickerDirect() {
+    const dialog = document.getElementById('poiTimelineClassifyDialog');
+    const picker = document.getElementById('poiClassifyPersonPicker');
+    const select = document.getElementById('poiClassifyPersonSelect');
+    const actions = dialog?.querySelector('.poi-classify-actions');
+    const cancel = document.getElementById('poiClassifyCancel');
+    if (!dialog || !picker || !select) return;
+
+    picker.hidden = false;
+    if (actions) actions.hidden = true;
+    if (cancel) cancel.hidden = true;
+    select.innerHTML = '<option value="">Carregando pessoas…</option>';
+    select.disabled = true;
+    await populatePersonPicker(true);
+  }
+
+  function bindPersonPickerDirect() {
+    document.addEventListener('click', event => {
+      const identify = event.target.closest?.('#poiClassifyIdentify');
+      if (!identify) return;
+      // Capture on document runs before the old V6.2 listener attached to the button.
+      // This bypasses its potentially hanging await loadPersons() path entirely.
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      void openPersonPickerDirect();
+    }, true);
   }
 
   function pickerNeedsRecovery() {
@@ -116,7 +176,7 @@
     if (V64.pickerTimer) return;
     V64.pickerTimer = setInterval(() => {
       if (pickerNeedsRecovery()) populatePersonPicker(false);
-    }, 700);
+    }, 1000);
   }
 
   function hardenVideoFit() {
@@ -130,6 +190,7 @@
     if (!document.getElementById('poiTimelinePlayer')) return false;
     bindSpaceCapture();
     bindClipAutoplay();
+    bindPersonPickerDirect();
     startPersonPickerRecovery();
     hardenVideoFit();
     return true;
