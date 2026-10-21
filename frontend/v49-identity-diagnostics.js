@@ -140,6 +140,13 @@
       script.dataset.poiV67 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v68]')) {
+      const script = document.createElement('script');
+      script.src = '/v68-audio-playback-bridge.js';
+      script.defer = true;
+      script.dataset.poiV68 = '1';
+      document.body.appendChild(script);
+    }
   }
 
   function install() {
