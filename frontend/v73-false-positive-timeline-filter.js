@@ -5,8 +5,11 @@
     key: '',
     loading: null,
     observer: null,
+    applyScheduled: false,
     lastSecond: null,
+    suppressFpUntil: 0,
     navToken: 0,
+    navKey: null,
   };
 
   const el = id => document.getElementById(id);
@@ -33,9 +36,15 @@
     return Boolean(play?.textContent?.includes('❚') || (video && !video.hidden && !video.paused && !video.ended));
   }
 
+  function isFalsePositiveEvent(item) {
+    const state = String(item?.identity_state || '').trim().toLowerCase();
+    const label = String(item?.label || '').trim().toLowerCase();
+    return state === 'false_positive' || label === 'falso positivo';
+  }
+
   function falsePositiveIds() {
     return new Set((S.day?.events || [])
-      .filter(item => String(item.identity_state || '') === 'false_positive')
+      .filter(isFalsePositiveEvent)
       .map(item => Number(item.id))
       .filter(Number.isFinite));
   }
@@ -74,56 +83,41 @@
 
   function setFiltered(node, filtered) {
     if (!node) return;
-    node.hidden = Boolean(filtered);
-    if (filtered) {
-      node.dataset.poiFpFiltered = '1';
-      node.style.display = 'none';
-      node.classList.remove('selected');
-    } else if (node.dataset.poiFpFiltered === '1') {
-      delete node.dataset.poiFpFiltered;
-      node.style.removeProperty('display');
-      node.hidden = false;
+    const shouldHide = Boolean(filtered);
+    if (shouldHide) {
+      if (node.dataset.poiFpFiltered !== '1') node.dataset.poiFpFiltered = '1';
+      if (!node.hidden) node.hidden = true;
+      if (node.style.display !== 'none') node.style.display = 'none';
+      if (node.classList.contains('selected')) node.classList.remove('selected');
+      return;
     }
+    if (node.dataset.poiFpFiltered !== '1') return;
+    delete node.dataset.poiFpFiltered;
+    if (node.style.display === 'none') node.style.removeProperty('display');
+    if (node.hidden) node.hidden = false;
   }
 
   function selectedEventId() {
     const classify = Number(el('poiTimelineClassify')?.dataset.eventId || 0);
     if (classify) return classify;
-    const selectors = [
+    const node = document.querySelector([
       '#poiV63ClipTrack [data-event-id].selected',
       '#poiV63EventTrack [data-event-id].selected',
       '#poiEventMarkers [data-event-id].selected',
       '#poiEventStrip [data-event-card].selected',
-    ];
-    for (const selector of selectors) {
-      const node = document.querySelector(selector);
-      const value = Number(node?.dataset.eventId || node?.dataset.eventCard || 0);
-      if (value) return value;
-    }
-    return null;
+    ].join(','));
+    return Number(node?.dataset.eventId || node?.dataset.eventCard || 0) || null;
   }
 
   function hideVisualEventArtifacts() {
     const overlay = el('poiV63EventOverlay');
     const bbox = el('poiV66BBox');
     const classify = el('poiTimelineClassify');
-    if (overlay) overlay.hidden = true;
-    if (bbox) bbox.hidden = true;
+    if (overlay && !overlay.hidden) overlay.hidden = true;
+    if (bbox && !bbox.hidden) bbox.hidden = true;
     if (classify) {
       classify.hidden = true;
       delete classify.dataset.eventId;
-    }
-  }
-
-  function clearHiddenSelection(ids) {
-    const selected = selectedEventId();
-    const overlaySaysFp = String(el('poiV63OverlayLabel')?.textContent || '').trim().toLowerCase() === 'falso positivo';
-    if ((selected && ids.has(selected)) || overlaySaysFp) {
-      document.querySelectorAll('.selected[data-event-id], .selected[data-event-card]').forEach(node => {
-        const id = Number(node.dataset.eventId || node.dataset.eventCard || 0);
-        if (ids.has(id)) node.classList.remove('selected');
-      });
-      hideVisualEventArtifacts();
     }
   }
 
@@ -140,34 +134,42 @@
     if (empty) empty.hidden = false;
     const title = el('poiMediaTitle');
     if (title) title.textContent = 'Sem mídia visível neste horário';
+    S.navKey = null;
   }
 
   function applyFilter() {
+    S.applyScheduled = false;
     if (!S.day) return;
     const ids = falsePositiveIds();
     const filtering = !showFalsePositives();
-    const selectors = [
-      ['#poiV63ClipTrack [data-event-id]', 'eventId'],
-      ['#poiV63EventTrack [data-event-id]', 'eventId'],
-      ['#poiEventMarkers [data-event-id]', 'eventId'],
-      ['#poiEventStrip [data-event-card]', 'eventCard'],
-    ];
-    for (const [selector, key] of selectors) {
-      document.querySelectorAll(selector).forEach(node => {
-        const id = Number(node.dataset[key] || 0);
-        setFiltered(node, filtering && id > 0 && ids.has(id));
-      });
-    }
 
+    document.querySelectorAll('#poiTimelinePlayer [data-event-id]').forEach(node => {
+      const id = Number(node.dataset.eventId || 0);
+      setFiltered(node, filtering && id > 0 && ids.has(id));
+    });
+    document.querySelectorAll('#poiEventStrip [data-event-card]').forEach(node => {
+      const id = Number(node.dataset.eventCard || 0);
+      setFiltered(node, filtering && id > 0 && ids.has(id));
+    });
     document.querySelectorAll('#poiCoverageTrack [data-recording-id]').forEach(node => {
       const rec = recordingById(node.dataset.recordingId);
       setFiltered(node, filtering && isHiddenFalsePositiveRecording(rec, ids));
     });
 
-    if (filtering) {
-      clearHiddenSelection(ids);
-      clearHiddenCurrentRecording(ids);
+    if (!filtering) return;
+
+    const selected = selectedEventId();
+    const overlaySaysFp = String(el('poiV63OverlayLabel')?.textContent || '').trim().toLowerCase() === 'falso positivo';
+    if ((selected && ids.has(selected)) || overlaySaysFp || performance.now() < S.suppressFpUntil) {
+      hideVisualEventArtifacts();
     }
+    clearHiddenCurrentRecording(ids);
+  }
+
+  function scheduleApplyFilter() {
+    if (S.applyScheduled) return;
+    S.applyScheduled = true;
+    requestAnimationFrame(applyFilter);
   }
 
   function playbackSecond() {
@@ -192,8 +194,7 @@
     if (!scrubber || document.activeElement === scrubber) return;
     scrubber.step = '0.01';
     const max = Number(scrubber.max || S.day?.day_duration_seconds || 86400);
-    const value = Math.max(0, Math.min(max, Number(second) || 0));
-    scrubber.value = String(value);
+    scrubber.value = String(Math.max(0, Math.min(max, Number(second) || 0)));
   }
 
   function bindVideoGuard() {
@@ -205,75 +206,73 @@
       syncPreciseScrubber(now);
       const latest = latestCrossedEvent(S.lastSecond, now);
       S.lastSecond = now;
-      if (showFalsePositives() || !latest || String(latest.identity_state || '') !== 'false_positive') return;
-      document.querySelectorAll('.selected[data-event-id], .selected[data-event-card]').forEach(node => {
-        const id = Number(node.dataset.eventId || node.dataset.eventCard || 0);
-        if (id === Number(latest.id)) node.classList.remove('selected');
-      });
-      hideVisualEventArtifacts();
+      if (!showFalsePositives() && latest && isFalsePositiveEvent(latest)) {
+        S.suppressFpUntil = performance.now() + 400;
+        queueMicrotask(() => {
+          hideVisualEventArtifacts();
+          scheduleApplyFilter();
+        });
+      }
     });
-    video.addEventListener('seeking', () => {
-      S.lastSecond = playbackSecond();
-    });
+    video.addEventListener('seeking', () => { S.lastSecond = playbackSecond(); });
   }
 
-  function visualItems(includeFalsePositives) {
-    const ids = falsePositiveIds();
-    const recordings = (S.day?.recordings || [])
-      .filter(rec => rec.file_url && Number(rec.end_second) > Number(rec.start_second))
-      .filter(rec => includeFalsePositives || String(rec.mode || '') !== 'event' || !rec.source_event_id || !ids.has(Number(rec.source_event_id)))
-      .map(rec => ({
-        type: 'visual',
-        start: Number(rec.start_second || 0),
-        end: Number(rec.end_second || 0),
-        rec,
-      }));
-    const events = (S.day?.events || [])
-      .filter(event => includeFalsePositives || !ids.has(Number(event.id)))
-      .filter(event => event.snapshot_url)
-      .filter(event => !recordings.some(item => item.start <= Number(event.second || 0) && Number(event.second || 0) <= item.end))
-      .map(event => ({
-        type: 'visual',
-        start: Number(event.second || 0),
-        end: Number(event.second || 0),
-        event,
-      }));
-    return [...recordings, ...events].sort((a, b) => a.start - b.start);
-  }
-
-  function temporalItems(includeFalsePositives) {
-    const visual = visualItems(includeFalsePositives);
-    const audio = (S.analysis?.audio_sessions || []).map(session => ({
-      type: 'audio',
-      start: Number(session.start_second || 0),
-      end: Math.max(Number(session.end_second || session.start_second || 0), Number(session.start_second || 0) + 4),
-      session,
-    }));
-    return [...visual, ...audio].sort((a, b) => {
-      const delta = Number(a.start) - Number(b.start);
-      if (Math.abs(delta) > .001) return delta;
-      if (a.type === b.type) return 0;
-      return a.type === 'audio' ? -1 : 1;
-    });
-  }
-
-  function temporalTarget(items, second, direction) {
-    if (direction > 0) return items.find(item => Number(item.start) > Number(second) + .35) || null;
-    const prior = items.filter(item => Number(item.start) < Number(second) - .35);
-    return prior.length ? prior[prior.length - 1] : null;
+  function itemKey(item) {
+    if (item?.rec) return `rec:${Number(item.rec.id)}`;
+    if (item?.event) return `event:${Number(item.event.id)}`;
+    if (item?.session) return `audio:${Number(item.session.id)}`;
+    return '';
   }
 
   function itemEventId(item) {
     return Number(item?.event?.id || item?.rec?.source_event_id || 0) || null;
   }
 
-  function safeTemporalSecond(item) {
+  function mediaItems(includeFalsePositives) {
+    const ids = falsePositiveIds();
+    const recordings = (S.day?.recordings || [])
+      .filter(rec => rec.file_url && Number(rec.end_second) > Number(rec.start_second))
+      .filter(rec => includeFalsePositives || String(rec.mode || '') !== 'event' || !rec.source_event_id || !ids.has(Number(rec.source_event_id)))
+      .map(rec => ({
+        type: 'recording',
+        start: Number(rec.start_second || 0),
+        end: Number(rec.end_second || 0),
+        rec,
+      }));
+
+    const recordingIds = new Set(recordings.map(item => Number(item.rec.id)));
+    const snapshots = (S.day?.events || [])
+      .filter(event => includeFalsePositives || !ids.has(Number(event.id)))
+      .filter(event => event.snapshot_url)
+      .filter(event => !event.recording_id || !recordingIds.has(Number(event.recording_id)))
+      .map(event => ({
+        type: 'snapshot',
+        start: Number(event.second || 0),
+        end: Number(event.second || 0),
+        event,
+      }));
+
+    const audio = (S.analysis?.audio_sessions || []).map(session => ({
+      type: 'audio',
+      start: Number(session.start_second || 0),
+      end: Math.max(Number(session.end_second || session.start_second || 0), Number(session.start_second || 0) + 4),
+      session,
+    }));
+
+    const rank = { recording: 0, snapshot: 1, audio: 2 };
+    return [...recordings, ...snapshots, ...audio].sort((a, b) => {
+      const delta = Number(a.start) - Number(b.start);
+      if (Math.abs(delta) > .0001) return delta;
+      const typeDelta = rank[a.type] - rank[b.type];
+      if (typeDelta) return typeDelta;
+      return itemKey(a).localeCompare(itemKey(b));
+    });
+  }
+
+  function seekTarget(item) {
     const start = Number(item?.start || 0);
     const end = Number(item?.end || start);
-    if (item?.rec && end > start) {
-      const margin = Math.min(.08, Math.max(.01, (end - start) / 4));
-      return Math.min(end - .005, start + margin);
-    }
+    if (item?.rec && end > start) return Math.min(end - .005, start + .02);
     if (item?.type === 'audio') return start + .01;
     return start;
   }
@@ -314,6 +313,57 @@
     }
   }
 
+  function currentMediaKey(items) {
+    const video = el('poiTimelineVideo');
+    if (video && !video.hidden && Number(video.dataset.recordingId || 0)) {
+      const key = `rec:${Number(video.dataset.recordingId)}`;
+      if (items.some(item => itemKey(item) === key)) return key;
+    }
+
+    const audioOverlay = el('poiV66AudioOverlay');
+    const selectedAudio = document.querySelector('#poiV66AudioTrack [data-audio-id].selected');
+    if (audioOverlay && !audioOverlay.hidden && selectedAudio) {
+      const key = `audio:${Number(selectedAudio.dataset.audioId)}`;
+      if (items.some(item => itemKey(item) === key)) return key;
+    }
+
+    const snapshot = el('poiTimelineSnapshot');
+    const selected = selectedEventId();
+    if (snapshot && !snapshot.hidden && selected) {
+      const key = `event:${selected}`;
+      if (items.some(item => itemKey(item) === key)) return key;
+    }
+
+    if (S.navKey && items.some(item => itemKey(item) === S.navKey)) return S.navKey;
+
+    if (selected) {
+      const rec = items.find(item => item.rec && Number(item.rec.source_event_id || 0) === selected);
+      if (rec) return itemKey(rec);
+      const event = items.find(item => item.event && Number(item.event.id) === selected);
+      if (event) return itemKey(event);
+    }
+
+    const now = playbackSecond();
+    const containing = items.find(item => item.rec && Number(item.start) <= now && now <= Number(item.end));
+    return containing ? itemKey(containing) : null;
+  }
+
+  function neighborByIndex(items, direction) {
+    if (!items.length) return null;
+    const key = currentMediaKey(items);
+    if (key) {
+      const index = items.findIndex(item => itemKey(item) === key);
+      if (index >= 0) return items[index + direction] || null;
+    }
+
+    const now = playbackSecond();
+    if (direction > 0) return items.find(item => Number(item.start) > now + .001) || null;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (Number(items[i].start) < now - .001) return items[i];
+    }
+    return null;
+  }
+
   function resumeHybridSoon() {
     setTimeout(() => {
       const play = el('poiHybridPlay');
@@ -321,16 +371,14 @@
     }, 120);
   }
 
-  function focusTemporalTarget(item, { resume = false } = {}) {
+  function focusMediaItem(item, { resume = false } = {}) {
     if (!item) return;
+    S.navKey = itemKey(item);
+
     if (item.type === 'audio') {
       const button = document.querySelector(`#poiV66AudioTrack [data-audio-id="${Number(item.session?.id)}"]`);
-      if (button) {
-        button.click();
-        requestAnimationFrame(() => seekExact(safeTemporalSecond(item)));
-        return;
-      }
-      seekExact(safeTemporalSecond(item));
+      if (button) button.click();
+      requestAnimationFrame(() => seekExact(seekTarget(item)));
       return;
     }
 
@@ -338,23 +386,21 @@
     syncEventSelection(eventId);
     const audioOverlay = el('poiV66AudioOverlay');
     if (audioOverlay) audioOverlay.hidden = true;
-    seekExact(safeTemporalSecond(item));
+    seekExact(seekTarget(item));
     if (resume) resumeHybridSoon();
   }
 
-  async function jumpTemporal(direction) {
+  async function jumpMediaDeterministic(direction) {
     const token = ++S.navToken;
     await loadData(false);
     if (token !== S.navToken || !S.day || !S.analysis) return;
-    const items = temporalItems(showFalsePositives());
-    const current = Number(el('poiDayScrubber')?.value || 0);
-    const target = temporalTarget(items, current, direction);
+    const items = mediaItems(showFalsePositives());
+    const target = neighborByIndex(items, direction);
     if (!target) return;
-    const wasPlaying = hybridPlaying();
-    focusTemporalTarget(target, { resume: wasPlaying });
+    focusMediaItem(target, { resume: hybridPlaying() });
   }
 
-  function bindNavigationGuard() {
+  function bindNavigationOwner() {
     if (window.__poiV73FpNavigationBound) return;
     window.__poiV73FpNavigationBound = true;
     window.addEventListener('click', event => {
@@ -364,22 +410,21 @@
       if (!next && !previous) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      void jumpTemporal(next ? 1 : -1);
+      void jumpMediaDeterministic(next ? 1 : -1);
     }, true);
   }
 
   function observeRenders() {
     if (S.observer) return;
-    const targets = [
-      el('poiV63ClipTrack'),
-      el('poiV63EventTrack'),
-      el('poiEventMarkers'),
-      el('poiEventStrip'),
-      el('poiCoverageTrack'),
-    ].filter(Boolean);
-    if (!targets.length) return;
-    S.observer = new MutationObserver(() => requestAnimationFrame(applyFilter));
-    targets.forEach(target => S.observer.observe(target, { childList: true }));
+    const root = el('poiTimelinePlayer');
+    if (!root) return;
+    S.observer = new MutationObserver(scheduleApplyFilter);
+    S.observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden', 'class', 'style', 'data-event-id', 'data-event-card', 'data-recording-id'],
+    });
   }
 
   function invalidate() {
@@ -387,23 +432,32 @@
     S.analysis = null;
     S.key = '';
     S.lastSecond = null;
+    S.navKey = null;
     S.navToken += 1;
   }
 
   function bindControls() {
     if (document.documentElement.dataset.poiV73FpBound === '1') return;
     document.documentElement.dataset.poiV73FpBound = '1';
+
     ['poiTimelineCamera', 'poiTimelineDate'].forEach(id => el(id)?.addEventListener('change', () => {
       invalidate();
-      setTimeout(() => loadData(true).then(applyFilter), 300);
+      setTimeout(() => loadData(true).then(scheduleApplyFilter), 300);
     }));
+
     el('poiTimelineRefresh')?.addEventListener('click', () => {
       invalidate();
-      setTimeout(() => loadData(true).then(applyFilter), 260);
+      setTimeout(() => loadData(true).then(scheduleApplyFilter), 260);
     });
+
     el('poiTimelineShowFp')?.addEventListener('change', () => {
-      applyFilter();
-      setTimeout(applyFilter, 80);
+      S.navKey = null;
+      scheduleApplyFilter();
+      setTimeout(scheduleApplyFilter, 100);
+    });
+
+    el('poiDayScrubber')?.addEventListener('input', event => {
+      if (event.isTrusted) S.navKey = null;
     });
   }
 
@@ -413,13 +467,13 @@
     if (scrubber) scrubber.step = '0.01';
     bindControls();
     bindVideoGuard();
-    bindNavigationGuard();
+    bindNavigationOwner();
     observeRenders();
-    void loadData(true).then(applyFilter);
+    void loadData(true).then(scheduleApplyFilter);
     return true;
   }
 
-  bindNavigationGuard();
+  bindNavigationOwner();
   if (!init()) {
     let attempts = 0;
     const timer = setInterval(() => {
