@@ -75,9 +75,26 @@ def timeline_analysis(
         if camera is None:
             raise HTTPException(status_code=404, detail="Câmera não encontrada")
 
+        # events.bbox_json follows the best display snapshot and may therefore be
+        # updated later in a track. For video overlays we need the box closest to
+        # the event trigger time. track_observations already stores that temporal
+        # history, so prefer the nearest observation and keep bbox_json as a
+        # backward-compatible fallback for older databases/events.
+        if _table_exists(conn, "track_observations"):
+            trigger_bbox_select = """
+                (SELECT t.bbox_json
+                 FROM track_observations t
+                 WHERE t.event_id = e.id
+                 ORDER BY ABS((julianday(t.created_at) - julianday(e.created_at)) * 86400.0) ASC,
+                          t.id ASC
+                 LIMIT 1) AS trigger_bbox_json,
+            """
+        else:
+            trigger_bbox_select = "NULL AS trigger_bbox_json,"
+
         event_rows = conn.execute(
-            """SELECT e.id, e.created_at, e.bbox_json, e.snapshot_path,
-                e.identity_state, e.person_id, e.probable_person_id,
+            f"""SELECT e.id, e.created_at, e.bbox_json, {trigger_bbox_select}
+                e.snapshot_path, e.identity_state, e.person_id, e.probable_person_id,
                 p.name AS person_name, pp.name AS probable_person_name
             FROM events e
             LEFT JOIN persons p ON p.id = e.person_id
@@ -121,11 +138,14 @@ def timeline_analysis(
         label = row["person_name"] or (f"{row['probable_person_name']}?" if row["probable_person_name"] else None)
         if not label:
             label = "Falso positivo" if str(row["identity_state"] or "") == "false_positive" else "Pessoa"
+        trigger_bbox = _bbox(row["trigger_bbox_json"])
+        display_bbox = _bbox(row["bbox_json"])
         events.append({
             "id": int(row["id"]),
             "second": second,
             "label": str(label),
-            "bbox": _bbox(row["bbox_json"]),
+            "bbox": trigger_bbox or display_bbox,
+            "bbox_source": "trigger_observation" if trigger_bbox else ("event_display" if display_bbox else None),
             "snapshot_url": f"/api/events/{int(row['id'])}/snapshot" if row["snapshot_path"] else None,
             "has_clip": int(row["id"]) in clip_event_ids,
             "identity_state": row["identity_state"],
