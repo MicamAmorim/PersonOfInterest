@@ -63,6 +63,13 @@
       link.dataset.poiV67 = '1';
       document.head.appendChild(link);
     }
+    if (!document.querySelector('link[data-poi-v70]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/v70-full-diagnostics.css';
+      link.dataset.poiV70 = '1';
+      document.head.appendChild(link);
+    }
     if (!document.querySelector('script[data-poi-v50]')) {
       const script = document.createElement('script');
       script.src = '/v50-persistent.js';
@@ -152,6 +159,13 @@
       script.src = '/v69-tonho-media-navigation.js';
       script.defer = true;
       script.dataset.poiV69 = '1';
+      document.body.appendChild(script);
+    }
+    if (!document.querySelector('script[data-poi-v70]')) {
+      const script = document.createElement('script');
+      script.src = '/v70-full-diagnostics.js';
+      script.defer = true;
+      script.dataset.poiV70 = '1';
       document.body.appendChild(script);
     }
   }
