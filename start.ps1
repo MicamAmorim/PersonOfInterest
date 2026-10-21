@@ -8,6 +8,21 @@ Set-StrictMode -Version Latest
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+# OpenCV can opportunistically initialize the system OpenCL runtime. On some
+# Windows/AMD driver combinations this may crash the whole Python process inside
+# amdocl64.dll (native access violation), which cannot be caught by Python.
+# PersonOfInterest currently runs YOLOX explicitly on ONNX Runtime CPU and does
+# not depend on OpenCL for Face/Body ReID, so keep OpenCL disabled by default.
+# Advanced users may opt back in before startup with: $env:POI_DISABLE_OPENCL="0"
+if ([string]::IsNullOrWhiteSpace($env:POI_DISABLE_OPENCL)) {
+    $env:POI_DISABLE_OPENCL = "1"
+}
+$disableOpenCL = $env:POI_DISABLE_OPENCL.Trim().ToLowerInvariant() -notin @("0", "false", "no", "off")
+if ($disableOpenCL) {
+    $env:OPENCV_OPENCL_RUNTIME = "disabled"
+    Write-Host "OpenCV OpenCL: desativado (proteção de estabilidade; POI_DISABLE_OPENCL=0 para reativar)." -ForegroundColor DarkGray
+}
+
 $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
 $Go2rtcExe = Join-Path $Root "bin\go2rtc.exe"
 $RuntimeConfig = Join-Path $Root "data\go2rtc.runtime.yaml"
