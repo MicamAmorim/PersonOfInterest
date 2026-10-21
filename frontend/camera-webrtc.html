@@ -185,8 +185,11 @@
     const camera = await response.json();
     if (cleanedUp) return;
 
-    videoFrame.src = `/go2rtc/stream.html?src=${encodeURIComponent(camera.stream_name)}`;
-    report('video-loading', 'Carregando vídeo…');
+    // Browser video always uses the dedicated H.264/Opus producer. Vision,
+    // recorder and backend audio continue using camera.stream_name unchanged.
+    const browserStream = `${camera.stream_name}_browser`;
+    videoFrame.src = `/go2rtc/stream.html?src=${encodeURIComponent(browserStream)}&v=v7.2.1`;
+    report('video-loading', 'Carregando vídeo H.264…');
 
     videoFrame.addEventListener('load', () => {
       [0, 80, 300, 1000].forEach(delay => setTimeout(muteVideoSurface, delay));
