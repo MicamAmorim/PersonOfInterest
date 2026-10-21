@@ -26,7 +26,13 @@ def install() -> None:
             raise HTTPException(status_code=404, detail="Gravação não encontrada")
         compatible = browser_compatible_path(int(recording_id), source)
         headers = {
-            "Cache-Control": "private, max-age=3600",
+            # Never let the browser reuse a pre-V7.2 HEVC response under the same
+            # /recordings/{id} URL. The compatible H.264 file is already cached on
+            # disk server-side, so disabling the browser HTTP cache is cheap and
+            # avoids a stale-codec black screen after upgrading.
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
             "X-POI-Media-Compatibility": "h264-cache" if compatible != source else "original",
         }
         return FileResponse(compatible, media_type="video/mp4", headers=headers)
