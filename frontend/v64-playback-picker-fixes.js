@@ -41,8 +41,7 @@
       if (eventId) {
         const card = document.querySelector(`#poiEventStrip [data-event-card="${eventId}"]`);
         if (card) {
-          // This runs in the same user gesture, after V63 has positioned the needle.
-          // Reusing the thumb path guarantees identical media selection and autoplay.
+          // Reuse the same path as the thumbnail so both interactions seek/play identically.
           card.click();
           return;
         }
@@ -106,42 +105,33 @@
   }
 
   function pickerNeedsRecovery() {
+    const dialog = document.getElementById('poiTimelineClassifyDialog');
     const picker = document.getElementById('poiClassifyPersonPicker');
     const select = document.getElementById('poiClassifyPersonSelect');
-    if (!picker || picker.hidden || !select) return false;
+    if (!dialog?.open || !picker || picker.hidden || !select) return false;
     return /carregando/i.test(select.textContent || '') || !hasNumericPersonOption(select);
   }
 
-  function observePersonPicker() {
-    const dialog = document.getElementById('poiTimelineClassifyDialog');
-    if (!dialog) return false;
-    const recover = () => {
+  function startPersonPickerRecovery() {
+    if (V64.pickerTimer) return;
+    V64.pickerTimer = setInterval(() => {
       if (pickerNeedsRecovery()) populatePersonPicker(false);
-    };
-    const observer = new MutationObserver(recover);
-    observer.observe(dialog, { attributes: true, childList: true, subtree: true });
-    V64.pickerTimer = setInterval(recover, 500);
-    return true;
+    }, 700);
   }
 
   function hardenVideoFit() {
-    const stage = document.getElementById('poiTimelineStage');
     const video = document.getElementById('poiTimelineVideo');
-    if (stage) stage.dataset.poiV64Fit = 'contain';
-    if (video) {
-      video.style.objectFit = 'contain';
-      video.style.objectPosition = 'center center';
-    }
+    if (!video) return;
+    video.style.objectFit = 'contain';
+    video.style.objectPosition = 'center center';
   }
 
   function init() {
     if (!document.getElementById('poiTimelinePlayer')) return false;
     bindSpaceCapture();
     bindClipAutoplay();
-    observePersonPicker();
+    startPersonPickerRecovery();
     hardenVideoFit();
-    const stage = document.getElementById('poiTimelineStage');
-    if (stage) new MutationObserver(hardenVideoFit).observe(stage, { childList: true, attributes: true, subtree: true });
     return true;
   }
 
