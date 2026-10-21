@@ -67,13 +67,20 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Reuse the same FFmpeg binary already supplied by imageio-ffmpeg for go2rtc's
-# lazy browser transcoding. This avoids requiring a system-wide ffmpeg.exe or
-# relying on Windows PATH/exec quoting.
+# lazy browser transcoding. go2rtc concatenates ffmpeg.bin directly into the
+# exec command it generates, so an absolute Windows path containing spaces would
+# be split before FFmpeg starts. Because go2rtc runs with $Root as WorkingDirectory,
+# use a relative path whose executable token contains no spaces.
 $Go2rtcFfmpegExe = (& $PythonExe -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())").Trim()
 if ([string]::IsNullOrWhiteSpace($Go2rtcFfmpegExe) -or -not (Test-Path $Go2rtcFfmpegExe)) {
     throw "FFmpeg do imageio-ffmpeg nao foi encontrado para o go2rtc."
 }
-$Go2rtcFfmpegYaml = ($Go2rtcFfmpegExe -replace '\\','/').Replace("'", "''")
+$Go2rtcFfmpegBin = [string](Resolve-Path -LiteralPath $Go2rtcFfmpegExe -Relative)
+$Go2rtcFfmpegBin = ($Go2rtcFfmpegBin -replace '\\','/').Trim()
+if ([string]::IsNullOrWhiteSpace($Go2rtcFfmpegBin) -or $Go2rtcFfmpegBin -match '\s') {
+    throw "O caminho relativo do FFmpeg para o go2rtc ainda contem espacos: $Go2rtcFfmpegBin"
+}
+$Go2rtcFfmpegYaml = $Go2rtcFfmpegBin.Replace("'", "''")
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
@@ -141,6 +148,7 @@ log:
 Write-Host "=== PersonOfInterest V5 ===" -ForegroundColor Cyan
 Write-Host "Iniciando go2rtc..."
 Write-Host "go2rtc FFmpeg: $Go2rtcFfmpegExe" -ForegroundColor DarkGray
+Write-Host "go2rtc FFmpeg bin: $Go2rtcFfmpegBin" -ForegroundColor DarkGray
 $Go2rtc = Start-Process -FilePath $Go2rtcExe -ArgumentList @("-c", "data\go2rtc.runtime.yaml") -WorkingDirectory $Root -PassThru -NoNewWindow
 
 $Backend = $null
