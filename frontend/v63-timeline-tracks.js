@@ -277,23 +277,28 @@
     const items = navigationItems();
     if (!items.length) return;
     const current = Number(document.getElementById('poiDayScrubber')?.value || 0);
-    let index = T.selectedEventId ? items.findIndex(item => Number(item.eventId) === Number(T.selectedEventId)) : -1;
-    if (index < 0) {
-      if (direction > 0) index = items.findIndex(item => item.eventSecond > current + .5) - 1;
-      else {
-        index = 0;
-        for (let i = 0; i < items.length; i += 1) if (items[i].eventSecond < current - .5) index = i + 1;
+    const selectedIndex = T.selectedEventId ? items.findIndex(item => Number(item.eventId) === Number(T.selectedEventId)) : -1;
+    let targetIndex = -1;
+    if (selectedIndex >= 0) {
+      targetIndex = selectedIndex + direction;
+    } else if (direction > 0) {
+      targetIndex = items.findIndex(item => item.eventSecond > current + .5);
+    } else {
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        if (items[i].eventSecond < current - .5) { targetIndex = i; break; }
       }
     }
-    const targetIndex = Math.max(0, Math.min(items.length - 1, index + direction));
+    if (targetIndex < 0 || targetIndex >= items.length) return;
     const item = items[targetIndex];
-    if (!item) return;
     if (item.event) syncSelection(item.event.id);
     if (item.type === 'clip') {
       seekSecond(item.anchor + .05);
       if (!isHybridPlaying() && item.event) showOverlay(item.event, true);
-    } else if (item.event) selectEvent(item.event, { persistent: !isHybridPlaying() });
-    else seekSecond(item.anchor + .05);
+    } else if (item.event) {
+      selectEvent(item.event, { persistent: !isHybridPlaying() });
+    } else {
+      seekSecond(item.anchor + .05);
+    }
   }
 
   function bindNextPreviousOverride() {
@@ -359,7 +364,9 @@
     if (T.data.is_today && T.data.recording?.mode === 'continuous' && T.data.now_second != null) {
       T.selectedEventId = null;
       hideOverlay();
-      seekSecond(Number(T.data.now_second));
+      const nowButton = document.getElementById('poiTimelineNow');
+      if (nowButton) nowButton.click();
+      else seekSecond(Number(T.data.now_second));
       return;
     }
     const events = visibleEvents();
@@ -425,19 +432,22 @@
     document.querySelectorAll('[data-rec-event-field]').forEach(label => {
       for (const node of label.childNodes) {
         if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
-          node.textContent = 'Duração do clipe de evento';
+          if (node.textContent.trim() !== 'Duração do clipe de evento') node.textContent = 'Duração do clipe de evento';
           break;
         }
       }
       const small = label.querySelector('small');
-      if (small) small.textContent = 'Metade da duração fica antes do evento (pré-buffer) e metade depois. Eventos próximos estendem a janela.';
+      const help = 'Metade da duração fica antes do evento (pré-buffer) e metade depois. Eventos próximos estendem a janela.';
+      if (small && small.textContent !== help) small.textContent = help;
     });
     document.querySelectorAll('.v58-camera-recording.collapsed .v58-mode-pill.event').forEach(pill => {
       const card = pill.closest('.v58-camera-recording');
       const headState = card?.querySelector('.v58-camera-recording-head>div>span');
       const summary = card?.querySelector('.v58-recording-summary>span');
-      if (headState && !headState.textContent.includes('buffer')) headState.textContent = 'Configurada · buffer pré-evento ativo';
-      if (summary) summary.textContent = 'Pré-buffer contínuo · metade do clipe antes e metade depois do evento';
+      const stateText = 'Configurada · buffer pré-evento ativo';
+      const summaryText = 'Pré-buffer contínuo · metade do clipe antes e metade depois do evento';
+      if (headState && headState.textContent !== stateText) headState.textContent = stateText;
+      if (summary && summary.textContent !== summaryText) summary.textContent = summaryText;
     });
   }
 
