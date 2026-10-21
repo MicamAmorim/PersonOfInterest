@@ -1,4 +1,4 @@
-const CACHE = 'personofinterest-v7.3.2-deterministic-media-navigation';
+const CACHE = 'personofinterest-v7.3.3-exact-recording-navigation';
 const SHELL = [
   '/', '/styles.css', '/v2.css', '/v34.css', '/v48-spatial.css',
   '/v50-persistent.css', '/v52-library-viewer.css', '/v53-doorbell.css', '/v54-pwa.css', '/v55-mobile-dashboard.css', '/v56-viewer-ux.css', '/v58-storage-recording.css', '/v60-timeline-player.css', '/v61-timeline-interactions.css', '/v62-hybrid-playback.css', '/v63-timeline-tracks.css', '/v64-playback-picker-fixes.css', '/v66-event-overlay-audio-track.css', '/v67-timeline-overlay-layout.css', '/v70-full-diagnostics.css',
@@ -48,7 +48,7 @@ self.addEventListener('push', (event) => {
   };
   if (data.image) options.image = data.image;
   event.waitUntil(Promise.all([
-    self.registration.showNotification(title, options),
+    self.registration.showNotification(title, options.image ? options : options),
     self.navigator?.setAppBadge ? self.navigator.setAppBadge() : Promise.resolve(),
   ]));
 });
