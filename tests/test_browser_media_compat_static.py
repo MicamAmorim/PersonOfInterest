@@ -19,12 +19,15 @@ def test_timeline_route_is_replaced_with_browser_compatible_file_response():
     assert "X-POI-Media-Compatibility" in text
 
 
-def test_go2rtc_primary_stream_gets_lazy_browser_fallback():
+def test_go2rtc_exposes_dedicated_lazy_browser_h264_stream():
     text = (ROOT / "backend/app/browser_stream_patch.py").read_text(encoding="utf-8")
+    assert "browser_stream_name" in text
+    assert "_browser" in text
     assert "exec:" in text
     assert '"libx264"' in text
     assert '"libopus"' in text
-    assert '"src": [rtsp_url, browser_source]' in text
+    assert "go2rtc.local_restream_url(stream_name)" in text
+    assert "original_upsert(browser_stream_name(stream_name), source)" in text
     assert "imageio_ffmpeg.get_ffmpeg_exe" in text
 
 
