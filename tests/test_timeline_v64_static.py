@@ -40,6 +40,13 @@ def test_v64_video_is_never_cover_cropped():
     assert "object-position:center center!important" in css
 
 
+def test_v64_has_no_recursive_stage_mutation_observer():
+    js = text("frontend/v64-playback-picker-fixes.js")
+    assert "new MutationObserver(hardenVideoFit)" not in js
+    assert "observe(stage" not in js
+    assert "startPersonPickerRecovery()" in js
+
+
 def test_v64_is_loaded_and_cached():
     loader = text("frontend/v49-identity-diagnostics.js")
     sw = text("frontend/sw.js")
@@ -47,4 +54,4 @@ def test_v64_is_loaded_and_cached():
     assert "/v64-playback-picker-fixes.js" in loader
     assert "/v64-playback-picker-fixes.css" in sw
     assert "/v64-playback-picker-fixes.js" in sw
-    assert "personofinterest-v6.4-playback-picker-fixes" in sw
+    assert "personofinterest-v6.4.1-timeline-freeze-hotfix" in sw
