@@ -24,13 +24,22 @@ def test_v64_direct_clip_reuses_thumb_playback_path():
     assert "card.click()" in js
 
 
-def test_v64_person_picker_has_direct_no_cache_api_fallback():
-    js = text("frontend/v64-playback-picker-fixes.js")
+def test_v61_owns_person_picker_and_fetches_people_directly():
+    js = text("frontend/v61-timeline-interactions.js")
+    assert 'id="poiClassifyPersonPicker"' in js
     assert "/api/persons?_=" in js
     assert "cache: 'no-store'" in js
-    assert "credentials: 'same-origin'" in js
+    assert "AbortController" in js
     assert "Selecione uma pessoa" in js
     assert "＋ Novo nome" in js
+    assert "/api/identity/events/${id}/assign" in js
+
+
+def test_v64_no_longer_owns_person_picker():
+    js = text("frontend/v64-playback-picker-fixes.js")
+    assert "/api/persons?_=" not in js
+    assert "startPersonPickerRecovery" not in js
+    assert "bindPersonPickerDirect" not in js
 
 
 def test_v64_video_is_never_cover_cropped():
@@ -44,7 +53,13 @@ def test_v64_has_no_recursive_stage_mutation_observer():
     js = text("frontend/v64-playback-picker-fixes.js")
     assert "new MutationObserver(hardenVideoFit)" not in js
     assert "observe(stage" not in js
-    assert "startPersonPickerRecovery()" in js
+
+
+def test_v65_hotfix_is_not_loaded_anymore():
+    loader = text("frontend/v49-identity-diagnostics.js")
+    sw = text("frontend/sw.js")
+    assert "/v65-person-picker-hotfix.js" not in loader
+    assert "/v65-person-picker-hotfix.js" not in sw
 
 
 def test_v64_is_loaded_and_cached():
@@ -54,4 +69,4 @@ def test_v64_is_loaded_and_cached():
     assert "/v64-playback-picker-fixes.js" in loader
     assert "/v64-playback-picker-fixes.css" in sw
     assert "/v64-playback-picker-fixes.js" in sw
-    assert "personofinterest-v6.4.1-timeline-freeze-hotfix" in sw
+    assert "personofinterest-v6.5.1-picker-root-fix" in sw
