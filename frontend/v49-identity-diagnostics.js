@@ -154,6 +154,13 @@
       script.dataset.poiV68 = '1';
       document.body.appendChild(script);
     }
+    if (!document.querySelector('script[data-poi-v73-fp]')) {
+      const script = document.createElement('script');
+      script.src = '/v73-false-positive-timeline-filter.js';
+      script.defer = true;
+      script.dataset.poiV73Fp = '1';
+      document.body.appendChild(script);
+    }
     if (!document.querySelector('script[data-poi-v69]')) {
       const script = document.createElement('script');
       script.src = '/v69-tonho-media-navigation.js';
