@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import quote
 
 from fastapi import WebSocket
 
 
 def install() -> None:
-    from . import api_v34
+    from . import api_v34, go2rtc
     from .db import connection
 
     if getattr(api_v34.router, "_poi_browser_ws_authorization", False):
@@ -25,7 +26,8 @@ def install() -> None:
             return
 
         browser_suffix = "_browser"
-        base_src = src[:-len(browser_suffix)] if src.endswith(browser_suffix) else src
+        is_browser = src.endswith(browser_suffix)
+        base_src = src[:-len(browser_suffix)] if is_browser else src
         if not base_src or (src != base_src and src != f"{base_src}{browser_suffix}"):
             await websocket.close(code=4404)
             return
@@ -45,6 +47,17 @@ def install() -> None:
         if src not in allowed:
             await websocket.close(code=4404)
             return
+
+        # Browser streams are runtime/lazy resources. Guarantee that the derived
+        # stream exists immediately before signaling so a lost/failed startup
+        # registration cannot surface as go2rtc's "stream not found" in the UI.
+        if is_browser:
+            ensure = getattr(go2rtc, "ensure_browser_stream", None)
+            if callable(ensure):
+                result = await asyncio.to_thread(ensure, base_src)
+                if not result.ok:
+                    await websocket.close(code=1011)
+                    return
 
         upstream_url = f"ws://127.0.0.1:1984/api/ws?src={quote(src)}"
         await api_v34._bridge_websocket(websocket, upstream_url)
