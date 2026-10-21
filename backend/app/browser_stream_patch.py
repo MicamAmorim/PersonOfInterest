@@ -24,6 +24,12 @@ def install() -> None:
     original_upsert = go2rtc.upsert_stream
     original_delete = go2rtc.delete_stream
 
+    def ensure_browser_stream(stream_name: str) -> Any:
+        return original_upsert(
+            browser_stream_name(stream_name),
+            browser_stream_source(stream_name),
+        )
+
     def upsert_stream(
         stream_name: str,
         rtsp_url: str,
@@ -35,10 +41,7 @@ def install() -> None:
 
         # Keep the primary producer untouched for vision/recording. The browser
         # gets a separate lazy stream that transcodes only when viewed.
-        browser_result = original_upsert(
-            browser_stream_name(stream_name),
-            browser_stream_source(stream_name),
-        )
+        browser_result = ensure_browser_stream(stream_name)
         if not browser_result.ok:
             result.warning = f"Stream H.264 do navegador indisponível: {browser_result.error}"
         return result
@@ -53,6 +56,7 @@ def install() -> None:
 
     go2rtc.browser_stream_name = browser_stream_name  # type: ignore[attr-defined]
     go2rtc.browser_stream_source = browser_stream_source  # type: ignore[attr-defined]
+    go2rtc.ensure_browser_stream = ensure_browser_stream  # type: ignore[attr-defined]
     go2rtc.upsert_stream = upsert_stream
     go2rtc.delete_stream = delete_stream
     go2rtc._poi_browser_stream_patch = True  # type: ignore[attr-defined]
