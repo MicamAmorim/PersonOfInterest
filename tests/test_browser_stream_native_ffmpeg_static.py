@@ -9,8 +9,10 @@ def test_browser_stream_uses_explicit_local_rtsp_ffmpeg_source():
     assert 'exec:' not in text
 
 
-def test_start_configures_go2rtc_ffmpeg_binary():
+def test_start_configures_go2rtc_ffmpeg_binary_without_spaces():
     text = Path('start.ps1').read_text(encoding='utf-8')
     assert 'imageio_ffmpeg.get_ffmpeg_exe()' in text
-    assert 'ffmpeg:' in text
-    assert 'bin:' in text
+    assert 'Resolve-Path -LiteralPath $Go2rtcFfmpegExe -Relative' in text
+    assert '$Go2rtcFfmpegBin -match \'\\s\'' in text
+    assert 'bin: \'$Go2rtcFfmpegYaml\'' in text
+    assert 'go2rtc FFmpeg bin:' in text
