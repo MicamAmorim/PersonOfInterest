@@ -1,5 +1,5 @@
 (() => {
-  const V64 = { personsLoading: false, personsLoadedAt: 0 };
+  const V64 = { personsLoading: false, personsLoadedAt: 0, personsAttemptAt: 0, pickerTimer: null };
 
   function timelineActive() {
     return Boolean(document.getElementById('timelineView')?.classList.contains('active'));
@@ -38,17 +38,16 @@
       if (!clip) return;
       try { clip.blur(); } catch (_) {}
       const eventId = Number(clip.dataset.eventId || 0);
-      setTimeout(() => {
-        if (eventId) {
-          const card = document.querySelector(`#poiEventStrip [data-event-card="${eventId}"]`);
-          if (card) {
-            // Reuse the proven thumb path so clip and thumb have identical seek/media behavior.
-            card.click();
-            return;
-          }
+      if (eventId) {
+        const card = document.querySelector(`#poiEventStrip [data-event-card="${eventId}"]`);
+        if (card) {
+          // This runs in the same user gesture, after V63 has positioned the needle.
+          // Reusing the thumb path guarantees identical media selection and autoplay.
+          card.click();
+          return;
         }
-        if (!hybridPlaying()) toggleHybridPlayback();
-      }, 140);
+      }
+      if (!hybridPlaying()) toggleHybridPlayback();
     });
   }
 
@@ -64,12 +63,19 @@
     return Array.isArray(payload) ? payload : [];
   }
 
+  function hasNumericPersonOption(select) {
+    return [...select.options].some(option => /^\d+$/.test(option.value) && Number(option.value) > 0);
+  }
+
   async function populatePersonPicker(force = false) {
     const picker = document.getElementById('poiClassifyPersonPicker');
     const select = document.getElementById('poiClassifyPersonSelect');
     if (!picker || !select || picker.hidden || V64.personsLoading) return;
     const loading = /carregando/i.test(select.textContent || '');
-    if (!force && !loading && Date.now() - V64.personsLoadedAt < 3000) return;
+    const missingPeople = !hasNumericPersonOption(select);
+    if (!force && !loading && !missingPeople && Date.now() - V64.personsLoadedAt < 5000) return;
+    if (!force && Date.now() - V64.personsAttemptAt < 1800) return;
+    V64.personsAttemptAt = Date.now();
     V64.personsLoading = true;
     const previous = select.value;
     try {
@@ -89,7 +95,7 @@
       else select.value = '';
       select.dispatchEvent(new Event('change', { bubbles: true }));
       V64.personsLoadedAt = Date.now();
-      select.dataset.poiV64Ready = '1';
+      select.dataset.poiV64Ready = options.length ? '1' : 'empty';
     } catch (error) {
       select.innerHTML = '<option value="">Falha ao carregar pessoas</option><option value="new">＋ Novo nome…</option>';
       select.dataset.poiV64Ready = '0';
@@ -99,22 +105,22 @@
     }
   }
 
+  function pickerNeedsRecovery() {
+    const picker = document.getElementById('poiClassifyPersonPicker');
+    const select = document.getElementById('poiClassifyPersonSelect');
+    if (!picker || picker.hidden || !select) return false;
+    return /carregando/i.test(select.textContent || '') || !hasNumericPersonOption(select);
+  }
+
   function observePersonPicker() {
     const dialog = document.getElementById('poiTimelineClassifyDialog');
     if (!dialog) return false;
-    const observer = new MutationObserver(() => {
-      const picker = document.getElementById('poiClassifyPersonPicker');
-      const select = document.getElementById('poiClassifyPersonSelect');
-      if (picker && !picker.hidden && select && /carregando/i.test(select.textContent || '')) {
-        populatePersonPicker(true);
-      }
-    });
+    const recover = () => {
+      if (pickerNeedsRecovery()) populatePersonPicker(false);
+    };
+    const observer = new MutationObserver(recover);
     observer.observe(dialog, { attributes: true, childList: true, subtree: true });
-    document.addEventListener('click', event => {
-      if (!event.target.closest?.('#poiClassifyIdentify')) return;
-      setTimeout(() => populatePersonPicker(true), 0);
-      setTimeout(() => populatePersonPicker(true), 180);
-    });
+    V64.pickerTimer = setInterval(recover, 500);
     return true;
   }
 
