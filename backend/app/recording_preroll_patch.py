@@ -389,8 +389,9 @@ def install() -> None:
                         self.errors[camera_id] = str(exc)
                 _prune_buffer(self, setting)
 
-        _finalize_due(self)
-
+        # Leia/mescle primeiro todos os eventos novos desta iteração. Finalizar
+        # antes disso criava uma corrida de ~1 s em que um evento ainda pertencente
+        # à janela atual podia abrir um segundo clipe sobreposto.
         for event in self._new_events():
             camera_id = int(event["camera_id"])
             setting = settings.get(camera_id)
