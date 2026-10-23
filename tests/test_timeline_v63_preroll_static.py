@@ -32,6 +32,21 @@ def test_event_clip_is_consolidated_as_real_recording():
     assert "-f\", \"concat" in source
 
 
+def test_merged_clip_tracks_every_event_explicitly():
+    source = text("backend/app/recording_preroll_patch.py")
+    assert "event_ids: list[int]" in source
+    assert "recording_event_links" in source
+    assert "current.event_ids.append(event_id)" in source
+    assert "for event_id in pending.event_ids" in source
+
+
+def test_failed_copy_concat_retries_with_reencode():
+    source = text("backend/app/recording_preroll_patch.py")
+    assert "fallback_command" in source
+    assert '"-c:v", "libx264"' in source
+    assert '"-c:a", "aac"' in source
+
+
 def test_editor_tracks_are_separate():
     js = text("frontend/v63-timeline-tracks.js")
     css = text("frontend/v63-timeline-tracks.css")
