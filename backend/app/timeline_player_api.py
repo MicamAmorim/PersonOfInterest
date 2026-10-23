@@ -13,7 +13,7 @@ from .storage_recording import RECORDINGS_DIR, recorder_manager, seconds_for
 
 
 router = APIRouter(tags=["timeline-player"])
-_CONTINUOUS_RE = re.compile(r"continuous_cam(?P<camera>\d+)_(?P<stamp>\d{8}_%H%M%S)\.mp4$", re.IGNORECASE)
+_CONTINUOUS_RE = re.compile(r"continuous_cam(?P<camera>\d+)_(?P<stamp>\d{8}_\d{6})\.mp4$", re.IGNORECASE)
 
 
 def _parse_iso(raw: str | None) -> datetime | None:
