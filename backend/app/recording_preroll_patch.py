@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ class PendingEventClip:
     start_at: datetime
     end_at: datetime
     queued_at: float
+    event_ids: list[int] = field(default_factory=list)
 
 
 def _ensure_runtime(self: Any) -> None:
@@ -127,6 +128,7 @@ def _prune_buffer(self: Any, setting: dict[str, Any]) -> None:
 def _queue_event_clip(self: Any, setting: dict[str, Any], event: dict[str, Any]) -> None:
     _ensure_runtime(self)
     camera_id = int(event["camera_id"])
+    event_id = int(event["id"])
     total_duration = max(
         2.0,
         sr.seconds_for(setting.get("event_duration_value", 60), setting.get("event_duration_unit", "seconds")),
@@ -139,20 +141,36 @@ def _queue_event_clip(self: Any, setting: dict[str, Any], event: dict[str, Any])
     if current is not None and start_at <= current.end_at + timedelta(seconds=BUFFER_SEGMENT_SECONDS * 2):
         current.start_at = min(current.start_at, start_at)
         current.end_at = max(current.end_at, end_at)
+        if event_id not in current.event_ids:
+            current.event_ids.append(event_id)
         return
     self._poi_pending_event_clips[camera_id] = PendingEventClip(
         camera_id=camera_id,
-        source_event_id=int(event["id"]),
+        source_event_id=event_id,
         event_at=event_at,
         start_at=start_at,
         end_at=end_at,
         queued_at=time.monotonic(),
+        event_ids=[event_id],
     )
 
 
 def _concat_quote(path: Path) -> str:
     text = path.resolve().as_posix().replace("'", "'\\''")
     return f"file '{text}'"
+
+
+def _run_ffmpeg(command: list[str], log_handle: Any) -> int:
+    completed = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        cwd=str(DATA_DIR),
+        timeout=120,
+        check=False,
+    )
+    return int(completed.returncode)
 
 
 def _finalize_event_clip(self: Any, pending: PendingEventClip) -> bool:
@@ -174,9 +192,9 @@ def _finalize_event_clip(self: Any, pending: PendingEventClip) -> bool:
     concat_file = _buffer_dir(pending.camera_id) / f"concat_{pending.source_event_id}_{time.time_ns()}.txt"
     try:
         concat_file.write_text("\n".join(_concat_quote(path) for _, _, path in segments) + "\n", encoding="utf-8")
-        command = [
+        copy_command = [
             ffmpeg,
-            "-hide_banner", "-loglevel", "warning",
+            "-hide_banner", "-loglevel", "warning", "-y",
             "-f", "concat", "-safe", "0",
             "-i", str(concat_file),
             "-c", "copy",
@@ -185,22 +203,35 @@ def _finalize_event_clip(self: Any, pending: PendingEventClip) -> bool:
         ]
         log_handle = self._log_handle(pending.camera_id)
         try:
-            completed = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                cwd=str(DATA_DIR),
-                timeout=120,
-                check=False,
-            )
+            returncode = _run_ffmpeg(copy_command, log_handle)
+            if returncode != 0 or not output.is_file() or output.stat().st_size <= 0:
+                try:
+                    output.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                # Remux por cópia pode falhar quando um segmento do rolling buffer
+                # termina em limite ruim de timestamp/keyframe. Reencode apenas no
+                # caminho de erro para preservar o clipe em vez de descartá-lo.
+                fallback_command = [
+                    ffmpeg,
+                    "-hide_banner", "-loglevel", "warning", "-y",
+                    "-fflags", "+genpts",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(concat_file),
+                    "-map", "0:v:0?", "-map", "0:a:0?",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    str(output),
+                ]
+                returncode = _run_ffmpeg(fallback_command, log_handle)
         finally:
             try:
                 log_handle.close()
             except Exception:
                 pass
-        if completed.returncode != 0 or not output.is_file() or output.stat().st_size <= 0:
-            self.errors[pending.camera_id] = f"Falha ao consolidar clipe com pré-buffer (FFmpeg {completed.returncode})"
+        if returncode != 0 or not output.is_file() or output.stat().st_size <= 0:
+            self.errors[pending.camera_id] = f"Falha ao consolidar clipe com pré-buffer (FFmpeg {returncode})"
             try:
                 output.unlink(missing_ok=True)
             except OSError:
@@ -212,6 +243,7 @@ def _finalize_event_clip(self: Any, pending: PendingEventClip) -> bool:
         relative = output.resolve().relative_to(sr.RECORDINGS_DIR.resolve()).as_posix()
         stat = output.stat()
         now = utc_now()
+        self.ensure_schema()
         with connection() as conn:
             conn.execute(
                 """INSERT INTO recording_files(
@@ -237,6 +269,18 @@ def _finalize_event_clip(self: Any, pending: PendingEventClip) -> bool:
                     now,
                 ),
             )
+            recording_row = conn.execute(
+                "SELECT id FROM recording_files WHERE path = ?",
+                (relative,),
+            ).fetchone()
+            if recording_row is not None:
+                recording_id = int(recording_row["id"])
+                for event_id in pending.event_ids or [pending.source_event_id]:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO recording_event_links(recording_id, event_id, created_at)
+                        VALUES (?, ?, ?)""",
+                        (recording_id, int(event_id), now),
+                    )
             conn.commit()
         self.errors.pop(pending.camera_id, None)
         return True
@@ -269,10 +313,43 @@ def install() -> None:
 
     original_init = cls.__init__
     original_status = cls.status
+    original_ensure_schema = cls.ensure_schema
 
     def init_with_preroll(self: Any) -> None:
         original_init(self)
         _ensure_runtime(self)
+
+    def ensure_schema_with_event_links(self: Any) -> None:
+        original_ensure_schema(self)
+        if getattr(self, "_poi_event_link_schema_ready", False):
+            return
+        with connection() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS recording_event_links (
+                    recording_id INTEGER NOT NULL,
+                    event_id INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(recording_id, event_id),
+                    FOREIGN KEY(recording_id) REFERENCES recording_files(id) ON DELETE CASCADE,
+                    FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_recording_event_links_event
+                    ON recording_event_links(event_id, recording_id);
+                CREATE INDEX IF NOT EXISTS idx_recording_event_links_recording
+                    ON recording_event_links(recording_id, event_id);
+                """
+            )
+            # Compatibilidade com gravações antigas: ao menos o source_event_id
+            # original passa a ser um vínculo explícito.
+            conn.execute(
+                """INSERT OR IGNORE INTO recording_event_links(recording_id, event_id, created_at)
+                SELECT id, source_event_id, created_at
+                FROM recording_files
+                WHERE source_event_id IS NOT NULL"""
+            )
+            conn.commit()
+        setattr(self, "_poi_event_link_schema_ready", True)
 
     def reconcile_with_preroll(self: Any) -> None:
         _ensure_runtime(self)
@@ -342,6 +419,7 @@ def install() -> None:
             {
                 "camera_id": pending.camera_id,
                 "source_event_id": pending.source_event_id,
+                "event_ids": list(pending.event_ids),
                 "start_at": pending.start_at.isoformat(),
                 "end_at": pending.end_at.isoformat(),
             }
@@ -350,6 +428,7 @@ def install() -> None:
         return state
 
     cls.__init__ = init_with_preroll
+    cls.ensure_schema = ensure_schema_with_event_links
     cls._reconcile = reconcile_with_preroll
     cls.status = status_with_preroll
     cls._poi_event_preroll_v63 = True
