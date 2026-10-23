@@ -52,6 +52,14 @@ class TimelinePlayerStaticTests(unittest.TestCase):
         self.assertIn('/api/timeline-player/recordings/{recording_id}', api)
         self.assertIn('FileResponse(path, media_type="video/mp4")', api)
 
+    def test_event_clips_use_explicit_event_links_not_time_overlap(self) -> None:
+        api = (ROOT / "backend/app/timeline_player_api.py").read_text(encoding="utf-8")
+        self.assertIn("recording_event_links", api)
+        self.assertIn("event_to_recordings", api)
+        self.assertIn('rec.get("mode") == "continuous"', api)
+        self.assertIn("covered = explicit or source_exact or continuous_cover", api)
+        self.assertIn('"event_ids": event_ids', api)
+
 
 if __name__ == "__main__":
     unittest.main()
