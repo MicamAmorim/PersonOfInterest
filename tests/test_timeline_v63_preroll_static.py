@@ -47,6 +47,12 @@ def test_failed_copy_concat_retries_with_reencode():
     assert '"-c:a", "aac"' in source
 
 
+def test_new_events_are_queued_before_due_clip_is_finalized():
+    source = text("backend/app/recording_preroll_patch.py")
+    reconcile = source[source.index("def reconcile_with_preroll"):source.index("def status_with_preroll")]
+    assert reconcile.index("for event in self._new_events()") < reconcile.index("_finalize_due(self)")
+
+
 def test_editor_tracks_are_separate():
     js = text("frontend/v63-timeline-tracks.js")
     css = text("frontend/v63-timeline-tracks.css")
