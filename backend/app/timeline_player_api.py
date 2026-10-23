@@ -13,7 +13,7 @@ from .storage_recording import RECORDINGS_DIR, recorder_manager, seconds_for
 
 
 router = APIRouter(tags=["timeline-player"])
-_CONTINUOUS_RE = re.compile(r"continuous_cam(?P<camera>\d+)_(?P<stamp>\d{8}_\d{6})\.mp4$", re.IGNORECASE)
+_CONTINUOUS_RE = re.compile(r"continuous_cam(?P<camera>\d+)_(?P<stamp>\d{8}_%H%M%S)\.mp4$", re.IGNORECASE)
 
 
 def _parse_iso(raw: str | None) -> datetime | None:
@@ -95,6 +95,8 @@ def timeline_player_day(
     duration_seconds = max(1.0, (end_utc - start_utc).total_seconds())
 
     recorder_manager.ensure_schema()
+    query_start = (start_utc - timedelta(days=1)).isoformat()
+    query_end = (end_utc + timedelta(days=1)).isoformat()
     with connection() as conn:
         camera = conn.execute(
             "SELECT id, name, location, enabled, sync_status FROM cameras WHERE id = ?",
@@ -124,12 +126,29 @@ def timeline_player_day(
               AND COALESCE(created_at, started_at, updated_at) >= ?
               AND COALESCE(created_at, started_at, updated_at) < ?
             ORDER BY COALESCE(started_at, created_at) ASC""",
-            (
-                int(camera_id),
-                (start_utc - timedelta(days=1)).isoformat(),
-                (end_utc + timedelta(days=1)).isoformat(),
-            ),
+            (int(camera_id), query_start, query_end),
         ).fetchall()
+        recording_link_rows = conn.execute(
+            """SELECT rel.recording_id, rel.event_id, e.identity_state
+            FROM recording_event_links rel
+            JOIN recording_files rf ON rf.id = rel.recording_id
+            JOIN events e ON e.id = rel.event_id
+            WHERE rf.camera_id = ?
+              AND COALESCE(rf.created_at, rf.started_at, rf.updated_at) >= ?
+              AND COALESCE(rf.created_at, rf.started_at, rf.updated_at) < ?
+            ORDER BY rel.recording_id, e.created_at ASC""",
+            (int(camera_id), query_start, query_end),
+        ).fetchall()
+
+    event_to_recordings: dict[int, list[int]] = {}
+    recording_to_events: dict[int, list[int]] = {}
+    recording_event_states: dict[int, list[str]] = {}
+    for link in recording_link_rows:
+        recording_id = int(link["recording_id"])
+        event_id = int(link["event_id"])
+        event_to_recordings.setdefault(event_id, []).append(recording_id)
+        recording_to_events.setdefault(recording_id, []).append(event_id)
+        recording_event_states.setdefault(recording_id, []).append(str(link["identity_state"] or ""))
 
     setting_data = dict(setting) if setting else {
         "camera_id": int(camera_id),
@@ -191,6 +210,8 @@ def timeline_player_day(
             "id": int(row["id"]),
             "mode": "continuous",
             "source_event_id": row.get("source_event_id"),
+            "event_ids": [],
+            "false_positive_only": False,
             "started_at": started.isoformat(),
             "ended_at": ended.isoformat(),
             "start_second": max(0.0, (started - start_utc).total_seconds()),
@@ -207,10 +228,18 @@ def timeline_player_day(
         relative = str(row.get("path") or "")
         path = (RECORDINGS_DIR / relative).resolve()
         file_exists = RECORDINGS_DIR.resolve() in path.parents and path.is_file()
+        recording_id = int(row["id"])
+        event_ids = list(recording_to_events.get(recording_id, []))
+        if not event_ids and row.get("source_event_id") is not None:
+            event_ids = [int(row["source_event_id"])]
+        states = recording_event_states.get(recording_id, [])
+        false_positive_only = bool(states) and all(state == "false_positive" for state in states)
         normalized.append({
-            "id": int(row["id"]),
+            "id": recording_id,
             "mode": "event",
             "source_event_id": row.get("source_event_id"),
+            "event_ids": event_ids,
+            "false_positive_only": false_positive_only,
             "started_at": started.isoformat(),
             "ended_at": ended.isoformat(),
             "start_second": max(0.0, (started - start_utc).total_seconds()),
@@ -218,27 +247,50 @@ def timeline_player_day(
             "duration_seconds": max(0.0, (ended - started).total_seconds()),
             "size_bytes": int(row.get("size_bytes") or 0),
             "status": str(row.get("status") or "complete"),
-            "file_url": f"/api/timeline-player/recordings/{int(row['id'])}" if file_exists else None,
+            "file_url": f"/api/timeline-player/recordings/{recording_id}" if file_exists else None,
         })
 
     normalized.sort(key=lambda item: (float(item["start_second"]), int(item["id"])))
+    normalized_by_id = {int(item["id"]): item for item in normalized}
 
     event_items: list[dict[str, Any]] = []
     for row in events:
         created = _parse_iso(row["created_at"])
         if created is None:
             continue
+        event_id = int(row["id"])
         second = min(duration_seconds, max(0.0, (created - start_utc).total_seconds()))
-        exact = next((rec for rec in normalized if rec.get("source_event_id") == row["id"] and rec.get("file_url")), None)
-        covered = exact or next(
+        explicit = next(
             (
-                rec for rec in normalized
-                if float(rec["start_second"]) <= second <= float(rec["end_second"]) and rec.get("file_url")
+                normalized_by_id[recording_id]
+                for recording_id in event_to_recordings.get(event_id, [])
+                if recording_id in normalized_by_id and normalized_by_id[recording_id].get("file_url")
             ),
             None,
         )
+        source_exact = next(
+            (
+                rec for rec in normalized
+                if rec.get("source_event_id") == event_id and rec.get("file_url")
+            ),
+            None,
+        )
+        # Event clips are never inferred by time: overlapping event clips made
+        # that association ambiguous and could link a false positive to another
+        # event's recording. Time containment remains valid only for continuous
+        # recordings, where the file genuinely represents the whole interval.
+        continuous_cover = next(
+            (
+                rec for rec in normalized
+                if rec.get("mode") == "continuous"
+                and float(rec["start_second"]) <= second <= float(rec["end_second"])
+                and rec.get("file_url")
+            ),
+            None,
+        )
+        covered = explicit or source_exact or continuous_cover
         event_items.append({
-            "id": int(row["id"]),
+            "id": event_id,
             "camera_id": int(row["camera_id"]),
             "track_id": row["track_id"],
             "event_type": row["event_type"],
@@ -251,7 +303,7 @@ def timeline_player_day(
             "created_at": created.isoformat(),
             "second": second,
             "label": _event_label(row),
-            "snapshot_url": f"/api/events/{int(row['id'])}/snapshot" if row["snapshot_path"] else None,
+            "snapshot_url": f"/api/events/{event_id}/snapshot" if row["snapshot_path"] else None,
             "recording_id": covered["id"] if covered else None,
             "recording_mode": covered["mode"] if covered else None,
             "recording_offset_seconds": max(0.0, second - float(covered["start_second"])) if covered else None,
