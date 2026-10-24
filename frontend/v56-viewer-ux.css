@@ -1,0 +1,101 @@
+/* V5.6 — mobile camera viewer UX. Presentation only: no tracker/vision changes. */
+.viewer-fullscreen-button{white-space:nowrap}
+.viewer-mobile-talk-dock{display:none}
+
+@media(max-width:900px),(pointer:coarse){
+  #viewerDialog.viewer-modal{width:min(96vw,760px);max-width:96vw;padding:14px;border-radius:22px}
+  #viewerDialog .viewer-header{display:block;position:relative;padding-right:48px}
+  #viewerDialog .viewer-header>div:first-child{min-width:0}
+  #viewerDialog .viewer-actions{margin-top:14px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;justify-content:stretch}
+  #viewerDialog .viewer-actions>.button,
+  #viewerDialog .viewer-actions>.follow-speed,
+  #viewerDialog .viewer-actions>.follow-toggle{width:100%;min-width:0;justify-content:center}
+  #viewerDialog .viewer-actions>[data-viewer-close]{position:absolute;right:0;top:0;margin:0}
+  #viewerDialog .follow-speed{min-height:42px;padding:7px 10px}
+  #viewerDialog .follow-speed input{min-width:0;width:100%}
+  #viewerDialog .follow-toggle{min-height:42px;padding:8px 10px}
+  #viewerDialog .viewer-frame-wrap{margin-top:14px;border-radius:16px}
+  #viewerDialog .viewer-footer{font-size:11px;gap:8px}
+  #viewerDialog .viewer-footer-status{gap:7px 12px}
+  #viewerDialog .viewer-mobile-talk-dock{display:block;position:sticky;bottom:0;z-index:20;margin:12px -2px -2px;padding:8px 2px calc(2px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(14,18,25,0),rgba(14,18,25,.96) 32%)}
+  #viewerDialog #talkMicBtn.poi-ptt-large{width:100%;min-height:62px;border-radius:18px;font-size:16px;font-weight:800;letter-spacing:.01em;border-color:rgba(97,218,251,.36);background:linear-gradient(180deg,rgba(24,35,48,.98),rgba(14,21,30,.98));box-shadow:0 10px 30px rgba(0,0,0,.28),inset 0 0 0 1px rgba(255,255,255,.025);touch-action:none;user-select:none;-webkit-user-select:none}
+  #viewerDialog #talkMicBtn.poi-ptt-large:active,
+  #viewerDialog #talkMicBtn.poi-ptt-large[aria-pressed="true"]{border-color:rgba(92,225,162,.68);background:linear-gradient(180deg,rgba(34,94,71,.96),rgba(20,61,47,.98));color:#d9ffec;box-shadow:0 0 0 1px rgba(92,225,162,.16) inset,0 0 28px rgba(92,225,162,.12)}
+}
+
+/* Native Fullscreen and the CSS fallback share one layout. */
+#viewerDialog:fullscreen,
+#viewerDialog.poi-faux-fullscreen,
+#viewerDialog.poi-viewer-fullscreen-active{
+  width:100vw!important;
+  max-width:none!important;
+  height:100dvh!important;
+  max-height:none!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:#02050a!important;
+  overflow:hidden!important;
+}
+#viewerDialog.poi-faux-fullscreen{position:fixed!important;inset:0!important;z-index:10000!important}
+body.poi-viewer-fullscreen-body{overflow:hidden!important}
+#viewerDialog:fullscreen::backdrop{background:#02050a}
+
+#viewerDialog.poi-viewer-fullscreen-active .viewer-frame-wrap{
+  position:absolute;inset:0;margin:0;border-radius:0;aspect-ratio:auto;background:#000
+}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-frame-wrap iframe{position:absolute;inset:0;width:100%;height:100%}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-header{
+  position:absolute;z-index:30;left:0;right:0;top:0;margin:0;padding:calc(10px + env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 24px max(14px,env(safe-area-inset-left));
+  display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
+  background:linear-gradient(180deg,rgba(1,4,8,.91),rgba(1,4,8,.62) 56%,transparent)
+}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-header .eyebrow{margin-bottom:3px;font-size:8px}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-header h2{font-size:clamp(18px,3vw,28px)}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-actions{margin:0;display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;max-width:72vw}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-actions>.button,
+#viewerDialog.poi-viewer-fullscreen-active .viewer-actions>.follow-speed,
+#viewerDialog.poi-viewer-fullscreen-active .viewer-actions>.follow-toggle{width:auto;min-height:36px;padding:6px 9px;background:rgba(7,12,18,.76);backdrop-filter:blur(12px);border-color:rgba(255,255,255,.14)}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-actions>[data-viewer-close]{position:static;width:38px;height:38px;background:rgba(7,12,18,.76);backdrop-filter:blur(12px)}
+#viewerDialog.poi-viewer-fullscreen-active .follow-speed input{width:82px}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-footer{
+  position:absolute;z-index:24;left:max(12px,env(safe-area-inset-left));bottom:max(10px,env(safe-area-inset-bottom));margin:0;padding:0;max-width:44vw;pointer-events:none
+}
+#viewerDialog.poi-viewer-fullscreen-active #trackHint{display:none}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-footer-status{justify-content:flex-start;gap:6px}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-footer-status>span{
+  display:inline-flex;padding:6px 8px;border:1px solid rgba(255,255,255,.11);border-radius:999px;background:rgba(3,8,13,.7);backdrop-filter:blur(10px);font-size:9px;color:#d3dce8
+}
+#viewerDialog.poi-viewer-fullscreen-active .vision-status{top:76px;left:max(12px,env(safe-area-inset-left));background:rgba(3,8,13,.68)}
+#viewerDialog.poi-viewer-fullscreen-active .ptz-joystick{right:max(16px,env(safe-area-inset-right));bottom:88px;width:96px;height:96px;opacity:.72}
+#viewerDialog.poi-viewer-fullscreen-active .viewer-mobile-talk-dock{
+  display:block;position:absolute;z-index:35;left:50%;bottom:max(10px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(380px,48vw);margin:0;padding:0;background:none
+}
+#viewerDialog.poi-viewer-fullscreen-active #talkMicBtn.poi-ptt-large{
+  width:100%;min-height:60px;border-radius:18px;background:rgba(7,13,20,.88);backdrop-filter:blur(14px);border:1px solid rgba(97,218,251,.48);font-size:15px;box-shadow:0 12px 38px rgba(0,0,0,.42)
+}
+
+@media(orientation:landscape) and (max-height:650px){
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-header{padding-top:max(8px,env(safe-area-inset-top));padding-bottom:20px}
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-header h2{font-size:20px}
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-header .muted{display:none}
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-actions{max-width:74vw;gap:5px}
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-actions>.button,
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-actions>.follow-speed,
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-actions>.follow-toggle{min-height:34px;padding:5px 8px;font-size:10px}
+  #viewerDialog.poi-viewer-fullscreen-active .follow-speed span{display:none}
+  #viewerDialog.poi-viewer-fullscreen-active .follow-speed input{width:72px}
+  #viewerDialog.poi-viewer-fullscreen-active .vision-status{top:58px;font-size:9px}
+  #viewerDialog.poi-viewer-fullscreen-active .ptz-joystick{width:82px;height:82px;bottom:76px}
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-mobile-talk-dock{width:min(330px,42vw)}
+  #viewerDialog.poi-viewer-fullscreen-active #talkMicBtn.poi-ptt-large{min-height:52px;font-size:14px}
+  #viewerDialog.poi-viewer-fullscreen-active .viewer-footer{max-width:45vw}
+}
+
+@media(max-width:700px) and (orientation:portrait){
+  #viewerDialog:not(.poi-viewer-fullscreen-active) .viewer-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #viewerDialog:not(.poi-viewer-fullscreen-active) .viewer-actions .viewer-fullscreen-button{grid-column:auto}
+  #viewerDialog:not(.poi-viewer-fullscreen-active) .viewer-actions .follow-speed,
+  #viewerDialog:not(.poi-viewer-fullscreen-active) .viewer-actions .follow-toggle{grid-column:span 1}
+}

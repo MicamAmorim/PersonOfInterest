@@ -7,12 +7,32 @@ from .assistant_v452_patch import install as _install_assistant_v452_patch
 from .assistant_model_settings_patch import install as _install_assistant_model_settings_patch
 from .assistant_command_stt_patch import install as _install_assistant_command_stt_patch
 from .assistant_wake_patch import install as _install_assistant_wake_patch
+from .assistant_live_bridge_patch import install as _install_assistant_live_bridge_patch
+from .assistant_web_search_patch import install as _install_assistant_web_search_patch
+from .assistant_web_fallback_patch import install as _install_assistant_web_fallback_patch
+from .assistant_web_speech_guard_patch import install as _install_assistant_web_speech_guard_patch
+from .assistant_talkback_guard_patch import install as _install_assistant_talkback_guard_patch
+from .analytics_v55_patch import install as _install_analytics_v55_patch
 from .body_negative_backfill import install as _install_body_negative_backfill
+from .body_trust_sync_patch import install as _install_body_trust_sync_patch
+from .diagnostics_v5_patch import install as _install_diagnostics_v5_patch
+from .device_push_pause_patch import install as _install_device_push_pause_patch
+from .doorbell_patch import install as _install_doorbell_patch
+from .event_lifecycle_patch import install as _install_event_lifecycle_patch
+from .face_refinement_patch import install as _install_face_refinement_patch
+from .false_positive_memory_patch import install as _install_false_positive_memory_patch
 from .identity_diagnostics_patch import install as _install_identity_diagnostics_patch
 from .identity_manual_guard_patch import install as _install_identity_manual_guard_patch
 from .identity_safety_patch import install as _install_identity_safety_patch
+from .manual_integrity_v5_patch import install as _install_manual_integrity_v5_patch
 from .manual_learning_patch import install as _install_manual_learning_patch
 from .ptz_safety_patch import install as _install_ptz_safety_patch
+from .recording_preroll_patch import install as _install_recording_preroll_patch
+from .reference_curator_patch import install as _install_reference_curator_patch
+from .snapshot_display_patch import install as _install_snapshot_display_patch
+from .storage_recording_patch import install as _install_storage_recording_patch
+from .timeline_analysis_patch import install as _install_timeline_analysis_patch
+from .tracking_v5_patch import install as _install_tracking_v5_patch
 from .spatial_vision_patch import install as _install_spatial_vision_patch
 
 _install_assistant_conversation_patch()
@@ -29,21 +49,101 @@ _install_identity_safety_patch()
 _install_identity_manual_guard_patch()
 _install_manual_learning_patch()
 _install_ptz_safety_patch()
+# V5 owns persistent track lifecycle, temporal body evidence, trusted galleries,
+# live scene access and manual-review provenance. Spatial rules observe it after.
+_install_tracking_v5_patch()
+# Analytics is read-only and intentionally sits above the V5 lifecycle schema.
+# It never mutates events or participates in detection/tracking/ReID.
+_install_analytics_v55_patch()
+# Timeline/UI snapshots keep the familiar BB overlay while Face/Body ReID read
+# the separate clean best/trigger frames. The display BB stays synchronized with
+# the same frame selected as the best event snapshot.
+_install_snapshot_display_patch()
+# Upgrade the old manual guard to recognize every manual provenance variant and
+# the new identity_origin column before any reindex/worker synchronization.
+_install_manual_integrity_v5_patch()
+# BodyIdentity's legacy label synchronizer would otherwise collapse
+# face_verified_trusted back to face_verified after each poll/restart.
+_install_body_trust_sync_patch()
+# User curation sits on top of automatic trust: disabled references stay disabled,
+# quarantine can be manually trusted, and face/body refs can be reassigned safely.
+_install_reference_curator_patch()
+# Manual false-positive examples are distilled into bounded camera-specific
+# prototypes that survive Timeline cleanup. Legacy hard-negatives stay active.
+_install_false_positive_memory_patch()
+# Legacy Body/Push workers must not race the collecting phase of an active track.
+_install_event_lifecycle_patch()
+# If an initially-unknown track yields a substantially better face later, refine
+# the same event to a known identity without duplicating unknown-cluster samples.
+_install_face_refinement_patch()
+# The conversation patch captured answer_command before V5 replaced it; refresh
+# that reference so Tonho's spoken commands use the live tracker state.
+_install_assistant_live_bridge_patch()
+# Add local date/date+time and web research. This installs after the live bridge
+# so web/date wrap the final live-aware command handler.
+_install_assistant_web_search_patch()
+# If SearXNG/DuckDuckGo have no useful result, try a structured Portuguese
+# Wikipedia search/extract. It is free and does not require an API key.
+_install_assistant_web_fallback_patch()
+# Command evaluation must be side-effect free. Only the live wake-word path may
+# emit the web-search preface; Tonho Lab/API calls stay silent unless they
+# explicitly request playback.
+_install_assistant_web_speech_guard_patch()
+# iCSee/XMEye OPTalk is single-session. Keep each TTS talkback stream ephemeral
+# and hold the speech lock until playback has really finished.
+_install_assistant_talkback_guard_patch()
+# Campainha is additive: device-local manual profiles, shared speaker targets,
+# optional spatial triggers and Tonho's face-aware arrival Push command.
+_install_doorbell_patch()
+# Notification pause is scoped to the current browser Push endpoint only; it
+# never disables global alert rules or another phone/PC subscription.
+_install_device_push_pause_patch()
+# Event-mode recording keeps a rolling stream-copy ring buffer so each clip can
+# include half of its configured duration before the triggering event. Install
+# this before storage_recording_patch so disk-guard wrapping remains authoritative.
+_install_recording_preroll_patch()
+# Storage/recording are accessory services. They wrap DB startup/shutdown only;
+# detection, tracking and ReID remain owners of their existing lifecycle.
+_install_storage_recording_patch()
+# Timeline analysis is read-only: expose persisted event BBs and Tonho wake
+# sessions without changing vision, ReID, recording or assistant behavior.
+_install_timeline_analysis_patch()
 # Spatial rules only observe finished tracks; failures are isolated from vision.
 _install_spatial_vision_patch()
 # Diagnostics attaches a sanitized calibration ZIP endpoint to the already-used
-# V3/V4 API router. It exports derived similarities, never raw embeddings/images.
+# V3/V4 API router. V5 then adds trust/temporal metadata without raw embeddings.
 _install_identity_diagnostics_patch()
+_install_diagnostics_v5_patch()
 
 del _install_assistant_conversation_patch
 del _install_assistant_v452_patch
 del _install_assistant_model_settings_patch
 del _install_assistant_command_stt_patch
 del _install_assistant_wake_patch
+del _install_assistant_live_bridge_patch
+del _install_assistant_web_search_patch
+del _install_assistant_web_fallback_patch
+del _install_assistant_web_speech_guard_patch
+del _install_assistant_talkback_guard_patch
+del _install_analytics_v55_patch
 del _install_body_negative_backfill
+del _install_body_trust_sync_patch
+del _install_diagnostics_v5_patch
+del _install_device_push_pause_patch
+del _install_doorbell_patch
+del _install_event_lifecycle_patch
+del _install_face_refinement_patch
+del _install_false_positive_memory_patch
 del _install_identity_diagnostics_patch
 del _install_identity_manual_guard_patch
 del _install_identity_safety_patch
+del _install_manual_integrity_v5_patch
 del _install_manual_learning_patch
 del _install_ptz_safety_patch
+del _install_recording_preroll_patch
+del _install_reference_curator_patch
+del _install_snapshot_display_patch
+del _install_storage_recording_patch
+del _install_timeline_analysis_patch
+del _install_tracking_v5_patch
 del _install_spatial_vision_patch

@@ -1,3 +1,8 @@
+param(
+    [ValidateSet("Ask", "Enable", "Disable")]
+    [string]$ServerAutostart = "Ask"
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
@@ -52,5 +57,35 @@ if (-not (Test-Path $Go2rtcExe)) {
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 
 Write-Host ""
-Write-Host "Setup concluído." -ForegroundColor Green
-Write-Host "Agora execute: .\start.ps1" -ForegroundColor Green
+Write-Host "Instalação principal concluída." -ForegroundColor Green
+
+$EnableAutostart = $false
+switch ($ServerAutostart) {
+    "Enable" { $EnableAutostart = $true }
+    "Disable" { $EnableAutostart = $false }
+    default {
+        $answer = Read-Host "Deseja que este computador inicie o servidor PersonOfInterest automaticamente ao entrar no Windows? [s/N]"
+        $EnableAutostart = $answer -match '^[SsYy]'
+    }
+}
+
+if ($EnableAutostart) {
+    $AutostartInstaller = Join-Path $Root "install-server-autostart.ps1"
+    if (-not (Test-Path $AutostartInstaller)) {
+        Write-Warning "Setup concluído, mas install-server-autostart.ps1 não foi encontrado."
+        Write-Host "Você ainda pode iniciar manualmente com: .\start.ps1" -ForegroundColor Yellow
+    } else {
+        try {
+            & $AutostartInstaller
+            Write-Host ""
+            Write-Host "Servidor automático configurado para este usuário do Windows." -ForegroundColor Green
+        } catch {
+            Write-Warning "A instalação principal foi concluída, mas o autostart falhou: $($_.Exception.Message)"
+            Write-Host "Tente depois: .\install-server-autostart.ps1" -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host "Autostart não habilitado." -ForegroundColor DarkGray
+    Write-Host "Para ativar depois: .\install-server-autostart.ps1" -ForegroundColor DarkGray
+    Write-Host "Para iniciar agora: .\start.ps1" -ForegroundColor Green
+}

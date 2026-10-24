@@ -1,0 +1,26 @@
+/* V6.7: presentation-only fixes for the Timeline stage. */
+#poiTimelineClassify{display:none!important}
+#poiTimelineStage.poi-v67-audio-only #poiTimelineEmpty{display:none!important}
+#poiTimelineStage.poi-v67-audio-only #poiV63EventOverlay{display:none!important}
+#poiTimelineStage.poi-v67-audio-only #poiV66BBox{display:none!important}
+#poiTimelineStage.poi-v67-audio-only #poiV66AudioOverlay{
+  left:50%!important;
+  right:auto!important;
+  top:50%!important;
+  transform:translate(-50%,-50%)!important;
+  width:min(560px,calc(100% - 48px))!important;
+  max-height:min(72%,520px);
+  padding:16px 18px;
+  box-shadow:0 22px 70px rgba(0,0,0,.55);
+}
+#poiTimelineStage.poi-v67-audio-only #poiV66AudioTurns{max-height:320px}
+#poiTimelineStage.poi-v67-audio-only #poiV66AudioOverlay .poi-v66-audio-head strong{font-size:13px}
+#poiTimelineStage.poi-v67-audio-only #poiV66AudioOverlay .poi-v66-audio-turn p{font-size:13px;line-height:1.45}
+@media(max-width:760px){
+  #poiTimelineStage.poi-v67-audio-only #poiV66AudioOverlay{
+    width:calc(100% - 24px)!important;
+    max-height:78%;
+    padding:13px 14px;
+  }
+  #poiTimelineStage.poi-v67-audio-only #poiV66AudioTurns{max-height:260px}
+}

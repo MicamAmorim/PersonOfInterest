@@ -4,6 +4,13 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.build-venv/
+.build-venv-windows/
+.build-venv-linux/
+
+# PyInstaller / release builds
+build/
+dist/
 
 # Local binaries
 bin/*

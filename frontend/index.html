@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#11151d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PersonOfInterest" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>PersonOfInterest</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icon.svg" />
@@ -13,6 +15,13 @@
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/v2.css" />
   <link rel="stylesheet" href="/v34.css" />
+  <link rel="stylesheet" href="/v53-doorbell.css" data-poi-v53="1" />
+  <link rel="stylesheet" href="/v54-pwa.css" data-poi-v54="1" />
+  <link rel="stylesheet" href="/v55-mobile-dashboard.css" data-poi-v55="1" />
+  <link rel="stylesheet" href="/v56-viewer-ux.css" data-poi-v56="1" />
+  <link rel="stylesheet" href="/v58-storage-recording.css" data-poi-v58="1" />
+  <link rel="stylesheet" href="/v60-timeline-player.css" data-poi-v60="1" />
+  <link rel="stylesheet" href="/v61-timeline-interactions.css" data-poi-v61="1" />
 </head>
 <body>
   <div class="app-shell">
@@ -66,7 +75,7 @@
             <label>Até<input id="timelineDateTo" type="date" /></label>
             <label>Hora inicial<input id="timelineTimeFrom" type="time" step="60" /></label>
             <label>Hora final<input id="timelineTimeTo" type="time" step="60" /></label>
-            <label>Face<select id="timelineFace"><option value="">Com ou sem face</option><option value="1">Face detectada</option><option value="0">Sem face</option></select></label>
+            <label>Face<select id="timelineFace"><option value="">Com ou sem face</option><option value="1">Face detectada</option><option value="0">Sem face útil</option></select></label>
             <div class="timeline-filter-buttons"><button class="button ghost small" id="timelineClearFilters">Limpar</button><button class="button primary small" id="timelineRefresh">Aplicar filtros</button></div>
           </div>
           <div id="timelineGrid" class="timeline-grid"><p class="muted">Carregando eventos…</p></div>
@@ -127,7 +136,7 @@
       </div>
     </div>
     <div class="viewer-frame-wrap" id="viewerStage">
-      <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen; microphone" referrerpolicy="same-origin"></iframe>
+      <iframe id="viewerFrame" title="Stream ao vivo" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>
       <div id="visionOverlay" class="vision-overlay"></div>
       <div id="visionStatus" class="vision-status">Visão: iniciando…</div>
       <div id="ptzJoystick" class="ptz-joystick" title="Arraste para mover a câmera"><div class="ptz-ring"><div id="ptzKnob" class="ptz-knob"></div></div></div>
@@ -142,6 +151,15 @@
   <script src="/v4-stream-fix.js" defer></script>
   <script src="/v4-audio-fix.js" defer></script>
   <script src="/v42-assistant.js" defer></script>
+  <script src="/v53-doorbell.js" defer data-poi-v53="1"></script>
+  <script src="/v54-pwa.js" defer data-poi-v54="1"></script>
+  <script src="/v55-mobile-dashboard.js" defer data-poi-v55="1"></script>
+  <script src="/v56-viewer-ux.js" defer data-poi-v56="1"></script>
+  <script src="/v57-device-push.js" defer data-poi-v57="1"></script>
+  <script src="/v58-storage-recording.js" defer data-poi-v58="1"></script>
+  <script src="/v59-db-maintenance.js" defer data-poi-v59="1"></script>
+  <script src="/v60-timeline-player.js" defer data-poi-v60="1"></script>
+  <script src="/v61-timeline-interactions.js" defer data-poi-v61="1"></script>
   <script src="/v49-identity-diagnostics.js" defer></script>
 </body>
 </html>
