@@ -4,6 +4,14 @@ O perfil leve serve o PersonOfInterest com cadastro de câmeras RTSP, vídeo ao 
 
 ## Instalar no Redmi
 
+No Termux, o [bootstrap da branch](../android/bootstrap.sh) prepara um Debian separado (`poi-debian`), clona o repositório e inicia o POI localmente:
+
+```bash
+curl -fL https://raw.githubusercontent.com/MicamAmorim/PersonOfInterest/feature/android-lite/android/bootstrap.sh -o poi.sh && bash poi.sh
+```
+
+Para preparar o ambiente manualmente:
+
 1. Instale o [Termux](https://github.com/termux/termux-app#installation) de uma fonte oficial, abra o app e rode:
 
    ```bash
@@ -33,10 +41,12 @@ O servidor e o go2rtc escutam em loopback por padrão. Mantenha os processos do 
 Com o servidor rodando, abra outra sessão no Termux e rode:
 
 ```bash
-proot-distro login --shared-tmp debian
+proot-distro login --shared-tmp poi-debian
 cd PersonOfInterest
 bash android/tailnet.sh poi-redmi-teste
 ```
+
+Na instalação manual, substitua `poi-debian` por `debian`.
 
 O script inicia um nó Tailscale em modo userspace, com estado próprio. Abra o link de autenticação exibido na primeira execução, aprove o nó na tailnet e confira a URL mostrada por **Serve**. O acesso fica restrito à tailnet e às regras dela. A configuração pressupõe MagicDNS e certificados HTTPS habilitados. Teste o site e o vídeo a partir de outro dispositivo conectado à VPN, enquanto o PC ainda atende os usuários pelo endereço de produção. [Userspace networking](https://tailscale.com/docs/concepts/userspace-networking) · [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
 
