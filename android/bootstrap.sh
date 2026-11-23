@@ -12,7 +12,9 @@ if ! command -v proot-distro >/dev/null; then
 fi
 
 container=poi-debian
-if ! proot-distro login --shared-tmp "$container" -- true >/dev/null 2>&1; then
+# Go uses the reported kernel version to select the ARM32 futex syscall.
+login=(proot-distro login --shared-tmp --kernel "$(uname -r)" "$container")
+if ! "${login[@]}" -- true >/dev/null 2>&1; then
   if proot-distro install --help 2>&1 | grep -q -- '--architecture'; then
     case "$(dpkg --print-architecture)" in
       arm) proot-distro install --name "$container" --architecture linux/arm/v7 debian:trixie-slim ;;
@@ -27,7 +29,7 @@ fi
 if command -v termux-wake-lock >/dev/null; then
   termux-wake-lock || echo 'O Android não aceitou o bloqueio de suspensão do Termux.' >&2
 fi
-proot-distro login --shared-tmp "$container" -- /bin/bash -lc '
+"${login[@]}" -- /bin/bash -lc '
   set -eu
   apt-get update
   apt-get install -y --no-install-recommends git python3 python3-venv ffmpeg curl ca-certificates util-linux

@@ -18,7 +18,7 @@ Para preparar o ambiente manualmente:
    pkg update
    pkg install proot-distro
    proot-distro install debian
-   proot-distro login --shared-tmp debian
+   proot-distro login --shared-tmp --kernel "$(uname -r)" debian
    ```
 
 2. Dentro do Debian, instale os pacotes e clone a branch. Se o repositório pedir autenticação, use a sessão GitHub do proprietário e mantenha as credenciais fora da URL e dos arquivos do projeto.
@@ -34,14 +34,14 @@ Para preparar o ambiente manualmente:
 
 3. No navegador do próprio telefone, abra `http://127.0.0.1:8080`. Cadastre a câmera com seu endereço RTSP e selecione-a em **Ao vivo**. Para testar gravação, selecione **Contínua** na aba **Câmeras**. O perfil pausa a gravação quando o espaço livre cai abaixo de 2 GiB. O banco e os arquivos ficam na pasta privada `~/.local/share/poi-lite/data` do Debian.
 
-O servidor e o go2rtc escutam em loopback por padrão. Mantenha os processos do Termux ativos e teste o acesso com a tela bloqueada antes de usar o aparelho como gravador. Se o Android suspender o processo, siga a documentação do [Termux:Boot](https://github.com/termux/termux-boot) para inicialização e `termux-wake-lock`.
+O servidor e o go2rtc escutam em loopback por padrão. Ao abrir o Debian pelo Termux, `--kernel "$(uname -r)"` informa o kernel real aos binários Go. Em aparelhos ARM32 como o Redmi 9 com Android 10, isso evita que o go2rtc e o Tailscale tentem usar chamadas de sistema de um kernel mais recente. Mantenha os processos do Termux ativos e teste o acesso com a tela bloqueada antes de usar o aparelho como gravador. Se o Android suspender o processo, siga a documentação do [Termux:Boot](https://github.com/termux/termux-boot) para inicialização e `termux-wake-lock`.
 
 ## Acessar via Tailscale
 
 Com o servidor rodando, abra outra sessão no Termux e rode:
 
 ```bash
-proot-distro login --shared-tmp poi-debian
+proot-distro login --shared-tmp --kernel "$(uname -r)" poi-debian
 cd PersonOfInterest
 bash android/tailnet.sh poi-redmi-teste
 ```
@@ -50,9 +50,11 @@ Na instalação manual, substitua `poi-debian` por `debian`.
 
 O script inicia um nó Tailscale em modo userspace, com estado próprio. Abra o link de autenticação exibido na primeira execução, aprove o nó na tailnet e confira a URL mostrada por **Serve**. O acesso fica restrito à tailnet e às regras dela. A configuração pressupõe MagicDNS e certificados HTTPS habilitados. Teste o site e o vídeo a partir de outro dispositivo conectado à VPN, enquanto o PC ainda atende os usuários pelo endereço de produção. [Userspace networking](https://tailscale.com/docs/concepts/userspace-networking) · [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
 
-Nas próximas inicializações, um comando pode subir ambos os serviços. Pare as duas sessões de teste antes de usar esse modo.
+Nas próximas inicializações, abra o Debian no Termux e inicie os dois serviços na mesma sessão. Pare as duas sessões de teste antes de usar esse modo.
 
 ```bash
+proot-distro login --shared-tmp --kernel "$(uname -r)" poi-debian
+cd PersonOfInterest
 POI_TAILSCALE_HOSTNAME=poi-redmi-teste bash android/run.sh
 ```
 
