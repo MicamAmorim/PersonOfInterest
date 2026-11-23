@@ -4,6 +4,7 @@
   background: #090c11; padding: 9px 12px; color: var(--text); font: inherit;
 }
 .lite-shell .topbar { margin-bottom: 22px; }
+.lite-quick-actions { margin-bottom: 18px; }
 .lite-shell .topbar label { width: min(44vw, 230px); }
 .lite-list { display: grid; gap: 10px; }
 .lite-list p { margin: 0; overflow-wrap: anywhere; }
@@ -16,6 +17,8 @@
 #recordings-panel { display: grid; gap: 16px; }
 #recording-player { width: 100%; max-height: 65vh; border-radius: 10px; background: #000; }
 #page-error { margin-bottom: 18px; }
+#discovery-dialog p { margin: 0; }
+#discovery-dialog form { padding: 16px 0 0; }
 @media (max-width: 700px) {
   .lite-shell { display: block; }
   .lite-shell .sidebar { position: static; height: auto; padding: 12px 16px; gap: 8px; }

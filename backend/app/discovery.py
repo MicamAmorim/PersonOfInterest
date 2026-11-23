@@ -83,9 +83,9 @@ async def _port_open(ip: str, port: int, timeout: float = 0.28) -> bool:
         return False
 
 
-async def scan_local_network(existing_hosts: set[str] | None = None) -> dict:
-    network = local_network_24()
-    local_ip = get_local_ipv4()
+async def scan_local_network(existing_hosts: set[str] | None = None, *, local_ip: str | None = None) -> dict:
+    local_ip = local_ip or get_local_ipv4()
+    network = ipaddress.ip_network(f"{local_ip}/24", strict=False)
     existing_hosts = existing_hosts or set()
     started = time.perf_counter()
     semaphore = asyncio.Semaphore(160)

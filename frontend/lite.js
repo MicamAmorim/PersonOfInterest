@@ -3,10 +3,16 @@ const cameraPicker = byId('live-camera');
 const recordingPicker = byId('recording-camera');
 const form = byId('camera-form');
 const dialog = byId('camera-dialog');
+const discoveryDialog = byId('discovery-dialog');
+const discoveryForm = byId('discovery-form');
+const discoveryList = byId('discovery-list');
+const discoverySubmit = discoveryForm.querySelector('[type="submit"]');
 let cameras = [];
 let activeView = '';
 let editingId = null;
 let recordingsRequest = 0;
+let discoveryRequest = 0;
+let discoveryIp = '';
 
 function element(tag, className, label) {
   const node = document.createElement(tag);
@@ -156,6 +162,88 @@ function editCamera(camera) {
   dialog.showModal();
 }
 
+function showDiscoveryList() {
+  discoveryRequest++;
+  discoveryIp = '';
+  discoveryForm.reset();
+  discoveryForm.classList.add('hidden');
+  discoveryList.classList.remove('hidden');
+  discoverySubmit.disabled = false;
+  discoverySubmit.textContent = 'Testar e adicionar';
+  setMessage('discovery-error');
+}
+
+async function findCameras() {
+  showDiscoveryList();
+  const request = discoveryRequest;
+  discoveryList.replaceChildren();
+  setMessage('discovery-status', 'Procurando câmeras na rede local do servidor…');
+  discoveryDialog.showModal();
+  try {
+    const result = await api('/api/discovery/scan', 'POST');
+    if (request !== discoveryRequest || !discoveryDialog.open) return;
+    setMessage('discovery-status', `Rede ${result.subnet} · ${result.devices.length} dispositivo(s) encontrado(s)`);
+    if (!result.devices.length) {
+      discoveryList.append(element('p', 'muted', 'Conecte o servidor à mesma rede da câmera ou use Adicionar câmera para informar o endereço RTSP.'));
+    }
+    for (const device of result.devices) {
+      const row = element('article', 'discovery-device');
+      const description = element('div', 'discovery-device-main');
+      const protocols = [device.rtsp ? 'RTSP' : '', device.onvif ? 'ONVIF' : ''].filter(Boolean).join(' · ');
+      description.append(element('h3', '', device.ip), element('p', 'muted', protocols));
+      let label = 'Configurar';
+      if (device.already_added) label = 'Já cadastrada';
+      else if (!device.rtsp) label = 'RTSP não encontrado';
+      const configure = actionButton(label, () => {
+        discoveryIp = device.ip;
+        byId('discovery-device').textContent = device.ip;
+        discoveryForm.elements.name.value = `Câmera ${device.ip.split('.').at(-1)}`;
+        discoveryList.classList.add('hidden');
+        discoveryForm.classList.remove('hidden');
+        discoveryForm.elements.name.focus();
+      });
+      configure.disabled = device.already_added || !device.rtsp;
+      row.append(description, configure);
+      discoveryList.append(row);
+    }
+  } catch (error) {
+    if (request === discoveryRequest && discoveryDialog.open) setMessage('discovery-status', error.message);
+  }
+}
+
+discoveryForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!discoveryIp || discoverySubmit.disabled) return;
+  const request = discoveryRequest;
+  const ip = discoveryIp;
+  const { name, username, password, path } = Object.fromEntries(new FormData(discoveryForm));
+  setMessage('discovery-error');
+  discoverySubmit.disabled = true;
+  discoverySubmit.textContent = 'Testando…';
+  try {
+    const user = username.trim();
+    const secret = password.trim();
+    const result = await api('/api/discovery/probe', 'POST', { ip, username: user, password: secret, path });
+    if (request !== discoveryRequest || !discoveryDialog.open) return;
+    if (!result.ok) throw new Error(result.error || 'Não foi possível validar a câmera.');
+    discoverySubmit.textContent = 'Adicionando…';
+    const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(secret)}@` : '';
+    await api('/api/cameras', 'POST', { name, rtsp_url: `rtsp://${auth}${ip}:554${result.path}` });
+    if (request === discoveryRequest && discoveryDialog.open) discoveryDialog.close();
+    if (activeView !== 'cameras') {
+      history.pushState({}, '', '/?view=cameras');
+      openView();
+    } else await refresh();
+  } catch (error) {
+    if (request === discoveryRequest && discoveryDialog.open) setMessage('discovery-error', error.message);
+  } finally {
+    if (request === discoveryRequest) {
+      discoverySubmit.disabled = false;
+      discoverySubmit.textContent = 'Testar e adicionar';
+    }
+  }
+});
+
 async function refresh() {
   setMessage('page-error');
   try {
@@ -213,6 +301,10 @@ cameraPicker.addEventListener('change', renderLive);
 recordingPicker.addEventListener('change', () => renderRecordings().catch((error) => setMessage('page-error', error.message)));
 byId('refresh-recordings').addEventListener('click', refresh);
 byId('new-camera').addEventListener('click', () => editCamera(null));
+byId('discover-cameras').addEventListener('click', findCameras);
+byId('close-discovery').addEventListener('click', () => discoveryDialog.close());
+byId('discovery-back').addEventListener('click', showDiscoveryList);
+discoveryDialog.addEventListener('close', showDiscoveryList);
 byId('cancel-camera').addEventListener('click', () => dialog.close());
 dialog.addEventListener('close', () => form.reset());
 

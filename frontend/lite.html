@@ -9,6 +9,8 @@
   <link rel="icon" href="/icon.svg">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/lite.css">
+  <link rel="stylesheet" href="/v54-pwa.css">
+  <script src="/v54-pwa.js" defer></script>
   <script src="/lite.js" defer></script>
 </head>
 <body>
@@ -23,6 +25,7 @@
       <div class="sidebar-status" role="status"><i id="health-dot" class="status-dot" aria-hidden="true"></i><div><span id="health-label">Conectando ao servidor</span></div></div>
     </aside>
     <main class="main" id="main">
+      <div class="top-actions lite-quick-actions"><button type="button" id="discover-cameras" class="button ghost">Encontrar câmeras</button></div>
       <div id="page-error" class="form-error" role="alert" hidden></div>
       <section id="live" hidden>
         <header class="topbar"><h1>Ao vivo</h1><label>Câmera<select id="live-camera"></select></label></header>
@@ -54,6 +57,22 @@
       <p id="camera-form-error" class="form-error" role="alert" hidden></p>
       <div class="modal-actions"><button id="cancel-camera" class="button ghost" type="button">Cancelar</button><button class="button primary" type="submit">Salvar</button></div>
     </form>
+  </dialog>
+  <dialog id="discovery-dialog" class="modal discovery-modal" aria-labelledby="discovery-title">
+    <div class="discovery-shell">
+      <div class="modal-header"><h2 id="discovery-title">Encontrar câmeras</h2><button id="close-discovery" type="button" class="icon-button" aria-label="Fechar">×</button></div>
+      <p id="discovery-status" class="discovery-status" role="status"></p>
+      <div id="discovery-list" class="discovery-list"></div>
+      <form id="discovery-form" class="discovery-setup hidden">
+        <div class="setup-heading"><h3 id="discovery-device"></h3><button type="button" id="discovery-back" class="button ghost small">Voltar</button></div>
+        <label>Nome<input name="name" maxlength="80" required></label>
+        <label>Usuário<input name="username" maxlength="128" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
+        <label>Senha<input name="password" type="password" maxlength="256" autocomplete="current-password"></label>
+        <label>Caminho RTSP <span class="optional">Opcional. Se vazio, o POI testa os caminhos mais comuns.</span><input name="path" maxlength="512" placeholder="/Streaming/Channels/101" autocapitalize="off" spellcheck="false"></label>
+        <p id="discovery-error" class="form-error" role="alert" hidden></p>
+        <div class="modal-actions"><button type="submit" class="button primary">Testar e adicionar</button></div>
+      </form>
+    </div>
   </dialog>
 </body>
 </html>

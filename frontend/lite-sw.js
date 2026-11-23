@@ -1,5 +1,5 @@
-const CACHE = 'personofinterest-android-lite-v1';
-const SHELL = ['/', '/styles.css', '/lite.css', '/lite.js', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'personofinterest-android-lite-v2';
+const SHELL = ['/', '/styles.css', '/lite.css', '/lite.js', '/manifest.webmanifest', '/icon.svg', '/v54-pwa.js', '/v54-pwa.css'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));

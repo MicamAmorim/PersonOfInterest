@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import shutil
 import sqlite3
@@ -20,10 +21,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.requests import HTTPConnection
 
-from . import go2rtc
+from . import discovery, go2rtc
 from .config import APP_NAME, APP_VERSION, DATA_DIR, FRONTEND_DIR, GO2RTC_API_URL
 from .db import connection, init_db, utc_now
-from .models import CameraCreate, CameraOut, CameraUpdate
+from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest
 from .storage_recording import RecorderManager, ensure_schema
 
 
@@ -48,6 +49,7 @@ player_assets = {
     "video-stream.js": "text/javascript",
     "video-rtc.js": "text/javascript",
 }
+lan_ranges = tuple(ipaddress.IPv4Network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 
 
 def camera_row(camera_id: int) -> sqlite3.Row:
@@ -146,6 +148,8 @@ async def private_api(request: Request, call_next):
 async def validation_error(request: Request, exc: RequestValidationError):
     if request.url.path.startswith("/api/cameras"):
         return JSONResponse({"detail": "Confira o nome e o endereço RTSP da câmera."}, 422)
+    if request.url.path == "/api/discovery/probe":
+        return JSONResponse({"detail": "Confira os dados de acesso da câmera."}, 422)
     return await request_validation_exception_handler(request, exc)
 
 
@@ -153,6 +157,39 @@ async def validation_error(request: Request, exc: RequestValidationError):
 async def health() -> dict:
     rtc = await asyncio.to_thread(go2rtc.health)
     return {"app": APP_NAME, "version": APP_VERSION, "profile": "lite", "go2rtc": "ok" if rtc.ok else "unavailable"}
+
+
+def camera_lan_ip() -> str:
+    try:
+        address = ipaddress.IPv4Address(discovery.get_local_ipv4())
+    except ValueError:
+        address = None
+    if address is None or not any(address in network for network in lan_ranges):
+        raise HTTPException(503, "Conecte o servidor à rede local das câmeras e tente novamente.")
+    return str(address)
+
+
+@app.post("/api/discovery/scan")
+async def discover_cameras() -> dict:
+    local_ip = camera_lan_ip()
+    with connection() as conn:
+        urls = [row["rtsp_url"] for row in conn.execute("SELECT rtsp_url FROM cameras")]
+    return await discovery.scan_local_network(discovery.hosts_from_rtsp_urls(urls), local_ip=local_ip)
+
+
+@app.post("/api/discovery/probe")
+async def probe_discovered_camera(payload: DiscoveryProbeRequest) -> dict:
+    camera_lan_ip()
+    if payload.port != 554 or any(char.isspace() for char in (payload.path or "")) or any(
+        char in payload.username for char in '\r\n'
+    ):
+        raise HTTPException(422, "Confira os dados de acesso da câmera.")
+    paths = (payload.path,) if payload.path else ("/Streaming/Channels/101", *discovery.DEFAULT_RTSP_PATHS)
+    try:
+        result = await asyncio.to_thread(discovery.probe_rtsp, payload.ip, payload.username, payload.password, 554, paths)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": result.ok, "auth_required": result.auth_required, "path": result.path, "error": result.error}
 
 
 @app.get("/api/cameras", response_model=list[CameraOut])
@@ -342,6 +379,6 @@ def service_worker() -> FileResponse:
 
 @app.get("/{asset_name}")
 def app_asset(asset_name: str) -> FileResponse:
-    if asset_name not in {"styles.css", "lite.css", "lite.js", "icon.svg"}:
+    if asset_name not in {"styles.css", "lite.css", "lite.js", "icon.svg", "v54-pwa.js", "v54-pwa.css"}:
         raise HTTPException(404, "Página não encontrada")
     return frontend_file(asset_name)

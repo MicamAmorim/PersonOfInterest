@@ -32,7 +32,9 @@ Para preparar o ambiente manualmente:
    bash android/run.sh
    ```
 
-3. No navegador do próprio telefone, abra `http://127.0.0.1:8080`. Cadastre a câmera com seu endereço RTSP e selecione-a em **Ao vivo**. Para testar gravação, selecione **Contínua** na aba **Câmeras**. O perfil pausa a gravação quando o espaço livre cai abaixo de 2 GiB. O banco e os arquivos ficam na pasta privada `~/.local/share/poi-lite/data` do Debian.
+3. No navegador do próprio telefone, abra `http://127.0.0.1:8080`. Use **Encontrar câmeras** para procurar na sub-rede local do servidor. Escolha uma câmera RTSP, informe as credenciais quando necessário e selecione **Testar e adicionar**. Também é possível usar **Adicionar câmera** na aba **Câmeras** para informar o endereço RTSP completo. Selecione a câmera em **Ao vivo**.
+
+Para testar gravação, selecione **Contínua** na aba **Câmeras**. O perfil pausa a gravação quando o espaço livre cai abaixo de 2 GiB. O banco e os arquivos ficam na pasta privada `~/.local/share/poi-lite/data` do Debian.
 
 O servidor e o go2rtc escutam em loopback por padrão. Ao abrir o Debian pelo Termux, `--kernel "$(uname -r)"` informa o kernel real aos binários Go. Em aparelhos ARM32 como o Redmi 9 com Android 10, isso evita que o go2rtc e o Tailscale tentem usar chamadas de sistema de um kernel mais recente. Mantenha os processos do Termux ativos e teste o acesso com a tela bloqueada antes de usar o aparelho como gravador. Se o Android suspender o processo, siga a documentação do [Termux:Boot](https://github.com/termux/termux-boot) para inicialização e `termux-wake-lock`.
 
@@ -49,6 +51,8 @@ bash android/tailnet.sh poi-redmi-teste
 Na instalação manual, substitua `poi-debian` por `debian`.
 
 O script inicia um nó Tailscale em modo userspace, com estado próprio. Abra o link de autenticação exibido na primeira execução, aprove o nó na tailnet e confira a URL mostrada por **Serve**. O acesso fica restrito à tailnet e às regras dela. A configuração pressupõe MagicDNS e certificados HTTPS habilitados. Teste o site e o vídeo a partir de outro dispositivo conectado à VPN, enquanto o PC ainda atende os usuários pelo endereço de produção. [Userspace networking](https://tailscale.com/docs/concepts/userspace-networking) · [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
+
+Abra a URL HTTPS no navegador do dispositivo em que quer instalar o PWA e clique em **Instalar app**. O botão abre a confirmação de instalação ou mostra como instalar pelo menu do navegador.
 
 Nas próximas inicializações, abra o Debian no Termux e inicie os dois serviços na mesma sessão. Pare as duas sessões de teste antes de usar esse modo.
 
