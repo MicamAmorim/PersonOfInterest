@@ -6,6 +6,8 @@ Câmeras, credenciais, embeddings, histórico, vídeos e regras permanecem no co
 
 > **Estado atual:** V5 em validação real. O fluxo principal continua sendo Git + `setup.ps1`/`start.ps1`. Os builds PyInstaller para Windows/Linux existem, mas devem ser testados no sistema operacional alvo antes de uma release pública.
 
+O [servidor leve para Android](docs/ANDROID_LITE.md) usa Termux/Debian e tem um procedimento de migração do endereço no Tailscale.
+
 ---
 
 ## Principais recursos

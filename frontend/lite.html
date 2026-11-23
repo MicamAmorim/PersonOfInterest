@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11151d">
+  <title>PersonOfInterest</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/lite.css">
+  <script src="/lite.js" defer></script>
+</head>
+<body>
+  <div class="app-shell lite-shell">
+    <aside class="sidebar">
+      <div class="brand"><img src="/icon.svg" alt=""><div><strong>PersonOfInterest</strong><span>Servidor leve</span></div></div>
+      <nav aria-label="Principal">
+        <a class="nav-item" data-view="live" href="/">Ao vivo</a>
+        <a class="nav-item" data-view="recordings" href="/?view=recordings">Gravações</a>
+        <a class="nav-item" data-view="cameras" href="/?view=cameras">Câmeras</a>
+      </nav>
+      <div class="sidebar-status" role="status"><i id="health-dot" class="status-dot" aria-hidden="true"></i><div><span id="health-label">Conectando ao servidor</span></div></div>
+    </aside>
+    <main class="main" id="main">
+      <div id="page-error" class="form-error" role="alert" hidden></div>
+      <section id="live" hidden>
+        <header class="topbar"><h1>Ao vivo</h1><label>Câmera<select id="live-camera"></select></label></header>
+        <div class="panel lite-player" id="live-player"></div>
+      </section>
+      <section id="recordings" hidden>
+        <header class="topbar"><h1>Gravações</h1><button id="refresh-recordings" class="button ghost">Atualizar</button></header>
+        <div class="panel" id="recordings-panel">
+          <label>Filtrar por câmera<select id="recording-camera"></select></label>
+          <video id="recording-player" controls playsinline preload="none" hidden aria-label="Reprodutor da gravação"></video>
+          <div id="recording-list" class="lite-list"></div>
+        </div>
+      </section>
+      <section id="cameras" hidden>
+        <header class="topbar"><h1>Câmeras</h1><button id="new-camera" class="button primary">Adicionar câmera</button></header>
+        <p id="recording-warning" class="form-error" role="status" hidden></p>
+        <div id="camera-list" class="lite-list"></div>
+      </section>
+    </main>
+  </div>
+  <dialog id="camera-dialog" class="modal" aria-labelledby="camera-dialog-title">
+    <form id="camera-form" autocomplete="off">
+      <div class="modal-header"><h2 id="camera-dialog-title">Adicionar câmera</h2></div>
+      <label>Nome<input name="name" maxlength="80" required></label>
+      <label>Local<input name="location" maxlength="120"></label>
+      <label>Endereço RTSP<input name="rtsp_url" maxlength="2048" type="password" placeholder="rtsp://…" autocapitalize="off" spellcheck="false" autocomplete="new-password" required></label>
+      <p id="rtsp-help" class="field-help" hidden>Deixe o campo vazio para manter o endereço salvo.</p>
+      <label class="switch-row">Câmera ativa<input name="enabled" type="checkbox" checked></label>
+      <p id="camera-form-error" class="form-error" role="alert" hidden></p>
+      <div class="modal-actions"><button id="cancel-camera" class="button ghost" type="button">Cancelar</button><button class="button primary" type="submit">Salvar</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
