@@ -4,18 +4,23 @@ umask 077
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 runtime=${POI_LITE_HOME:-"$HOME/.local/share/poi-lite"}
 
-case "$(uname -m)" in
+case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
   aarch64|arm64)
     arch=arm64
     go2rtc_hash=af416f22b21a24ab83b8d78642190b4932ae695b4e386853f11d1b0319781763
     tailscale_hash=d6bed2720310b328b861f943d7b4016c5358a9bad60575eb51e8143b79068484
+    ;;
+  armhf|arm|armv7l|armv8l)
+    arch=arm
+    go2rtc_hash=cbffe4075a004e2015fd9d7e324800ab7968b52f49e9ce803361879d5e246028
+    tailscale_hash=1c753fef45d497491081db37552b7a2a42c7932292743bf6936cb1a42b6bceb0
     ;;
   x86_64|amd64)
     arch=amd64
     go2rtc_hash=20b46c6910734cb05ecefb234066f36868ff19b42ba1418a7a32e13a3e035712
     tailscale_hash=e56693ff74a64f2591b7e819c280635a100aae1ddfb0ef058fcd052b7cd8d16c
     ;;
-  *) echo 'Use um ambiente Linux de 64 bits (ARM64 ou AMD64).' >&2; exit 1 ;;
+  *) echo 'Use Debian ARM32 (armhf), ARM64 ou AMD64.' >&2; exit 1 ;;
 esac
 
 if ! command -v python3 >/dev/null || ! command -v ffmpeg >/dev/null || ! command -v curl >/dev/null || ! command -v flock >/dev/null; then

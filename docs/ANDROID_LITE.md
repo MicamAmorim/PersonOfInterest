@@ -1,6 +1,6 @@
 # Servidor leve no Android
 
-O perfil leve serve o PersonOfInterest com cadastro de câmeras RTSP, vídeo ao vivo, gravação contínua e reprodução. O backend usa FastAPI, SQLite, go2rtc e FFmpeg. Visão computacional, reconhecimento, gravação por evento, alertas por IA e Tonho ficam no servidor completo. Para vídeo ao vivo, selecione um fluxo H.264 na câmera. O servidor repassa o vídeo sem transcodificação por padrão.
+O perfil leve serve o PersonOfInterest com cadastro de câmeras RTSP, vídeo ao vivo, gravação contínua e reprodução. O backend usa FastAPI, SQLite, go2rtc e FFmpeg. Visão computacional, reconhecimento, gravação por evento, alertas por IA e Tonho ficam no servidor completo. Para vídeo ao vivo, selecione um fluxo H.264 na câmera. O servidor repassa o vídeo sem transcodificação por padrão. O instalador seleciona os binários para Debian ARM32 (`armhf`), ARM64 ou AMD64.
 
 ## Instalar no Redmi
 
