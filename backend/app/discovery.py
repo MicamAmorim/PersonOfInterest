@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 DISCOVERY_PORTS = (80, 443, 554, 8000, 8080, 8899)
+CAMERA_PORTS = (554, 8899)
 DEFAULT_RTSP_PATHS = (
     "/live/ch00_0",
     "/live/ch00_1",
@@ -83,28 +84,36 @@ async def _port_open(ip: str, port: int, timeout: float = 0.28) -> bool:
         return False
 
 
-async def scan_local_network(existing_hosts: set[str] | None = None, *, local_ip: str | None = None) -> dict:
+async def scan_local_network(
+    existing_hosts: set[str] | None = None,
+    *,
+    local_ip: str | None = None,
+    prioritize_camera_ports: bool = False,
+) -> dict:
     local_ip = local_ip or get_local_ipv4()
     network = ipaddress.ip_network(f"{local_ip}/24", strict=False)
     existing_hosts = existing_hosts or set()
     started = time.perf_counter()
-    semaphore = asyncio.Semaphore(160)
-
-    async def scan_port(ip: str, port: int) -> tuple[str, int, bool]:
-        async with semaphore:
-            return ip, port, await _port_open(ip, port)
-
-    tasks = [
-        asyncio.create_task(scan_port(str(host), port))
-        for host in network.hosts()
-        if str(host) != local_ip
-        for port in DISCOVERY_PORTS
-    ]
+    semaphore = asyncio.Semaphore(64 if prioritize_camera_ports else 160)
     open_by_ip: dict[str, list[int]] = {}
-    for task in asyncio.as_completed(tasks):
-        ip, port, opened = await task
-        if opened:
-            open_by_ip.setdefault(ip, []).append(port)
+
+    async def scan_ports(hosts: list[str], ports: tuple[int, ...], timeout: float) -> None:
+        async def scan_port(ip: str, port: int) -> None:
+            async with semaphore:
+                opened = await _port_open(ip, port, timeout)
+            if opened:
+                open_by_ip.setdefault(ip, []).append(port)
+
+        await asyncio.gather(*(scan_port(host, port) for host in hosts for port in ports))
+
+    hosts = [str(host) for host in network.hosts() if str(host) != local_ip]
+    if prioritize_camera_ports:
+        # A first connection on Wi-Fi may wait for address resolution or a retransmission.
+        await scan_ports(hosts, CAMERA_PORTS, 1.5)
+        auxiliary_ports = tuple(port for port in DISCOVERY_PORTS if port not in CAMERA_PORTS)
+        await scan_ports(list(open_by_ip), auxiliary_ports, 0.4)
+    else:
+        await scan_ports(hosts, DISCOVERY_PORTS, 0.28)
 
     devices = []
     for ip, ports in sorted(open_by_ip.items(), key=lambda item: tuple(int(p) for p in item[0].split("."))):

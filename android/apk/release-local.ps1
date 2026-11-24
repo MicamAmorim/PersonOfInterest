@@ -9,7 +9,7 @@ param(
     [string]$KeyAlias = 'poi-android',
     [switch]$Publish,
     [string]$Repository = 'MicamAmorim/PersonOfInterest',
-    [string]$Tag = 'android-server-v0.1.0',
+    [string]$Tag = 'android-server-v0.1.1',
     [string]$FfmpegSource
 )
 
@@ -66,5 +66,5 @@ $commit = (& git -C $project rev-parse HEAD).Trim()
 Assert-Exit 'Leitura do commit'
 & gh api "repos/$Repository/commits/$commit" --jq .sha | Out-Null
 Assert-Exit 'Confirmação do commit publicado'
-& gh release create $Tag $asset $shaFile "$FfmpegSource#FFmpeg 9.1 corresponding source" --repo $Repository --target $commit --title 'POI Server para Android 0.1.0' --notes-file (Join-Path $PSScriptRoot 'release-notes.md') --prerelease
+& gh release create $Tag $asset $shaFile "$FfmpegSource#FFmpeg 9.1 corresponding source" --repo $Repository --target $commit --title 'POI Server para Android 0.1.1' --notes-file (Join-Path $PSScriptRoot 'release-notes.md') --prerelease
 Assert-Exit 'Publicação no GitHub Releases'

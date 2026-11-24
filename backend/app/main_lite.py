@@ -180,7 +180,9 @@ async def discover_cameras() -> dict:
     local_ip = camera_lan_ip()
     with connection() as conn:
         urls = [row["rtsp_url"] for row in conn.execute("SELECT rtsp_url FROM cameras")]
-    return await discovery.scan_local_network(discovery.hosts_from_rtsp_urls(urls), local_ip=local_ip)
+    return await discovery.scan_local_network(
+        discovery.hosts_from_rtsp_urls(urls), local_ip=local_ip, prioritize_camera_ports=True,
+    )
 
 
 @app.post("/api/discovery/probe")

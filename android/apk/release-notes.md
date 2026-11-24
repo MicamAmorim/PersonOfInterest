@@ -1,6 +1,6 @@
-## POI Server para Android 0.1.0
+## POI Server para Android 0.1.1
 
-Primeira versão do servidor POI Lite empacotada em APK para Android ARM32 e ARM64. Abra **POI Server** e toque em **Iniciar servidor**. O app executa o servidor, o vídeo RTSP, a gravação contínua e a VPN dentro da própria instalação, com serviço em primeiro plano e inicialização após o boot.
+Melhora a busca em redes Wi-Fi. O POI consulta primeiro as portas RTSP e ONVIF, dá mais tempo para cada resposta e limita o número de conexões simultâneas. O APK continua disponível para Android ARM32 e ARM64.
 
 Use **Encontrar câmeras** para cadastrar equipamentos na rede local. Para acesso privado por HTTPS, escolha um nome de nó e autorize o Tailscale pela interface do APK. O comando **Instalar app** na interface web instala o PWA no dispositivo visitante.
 
