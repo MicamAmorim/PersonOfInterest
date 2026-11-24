@@ -1,0 +1,42 @@
+name: POI Android Controller
+on:
+  push:
+    branches: [feature/android-apk-controller]
+    paths: ["android/apk/**", ".github/workflows/android-apk.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Compile Android beta APK
+        run: gradle -p android/apk :app:assembleDebug --no-daemon
+      - run: cp android/apk/app/build/outputs/apk/debug/app-debug.apk POI-Server-Android-Controller-beta.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: POI-Server-Android-Controller-beta
+          path: POI-Server-Android-Controller-beta.apk
+          if-no-files-found: error
+      - name: Publish experimental prerelease
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          gh release create "android-controller-beta-$SHORT_SHA" \
+            POI-Server-Android-Controller-beta.apk \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "POI Android Controller beta ($SHORT_SHA)" \
+            --prerelease \
+            --notes "EXPERIMENTAL: controls the existing Termux/Debian Android Lite server; not a native standalone server. Requires manual Termux permission, battery/autostart setup and testing on the Redmi 9. Debug-signed."
