@@ -2,70 +2,144 @@ package com.micamamorim.poiserver;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.*;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.*;
-import android.provider.Settings;
-import android.graphics.Color;
-import android.widget.*;
-import java.util.concurrent.*;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import org.json.JSONObject;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 public final class MainActivity extends Activity {
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private SharedPreferences preferences;
     private TextView status;
     private EditText hostname;
-    private final Handler ui=new Handler(Looper.getMainLooper());
-    private final ExecutorService io=Executors.newSingleThreadExecutor();
-    @Override public void onCreate(Bundle b){
-        super.onCreate(b);
-        LinearLayout layout=new LinearLayout(this);layout.setOrientation(1);layout.setPadding(30,30,30,30);
-        layout.setBackgroundColor(Color.rgb(246,247,251));
-        ScrollView sc=new ScrollView(this);sc.addView(layout);setContentView(sc);
-        TextView title=new TextView(this);title.setText("POI Server — Android");title.setTextSize(23);
-        title.setPadding(0,0,0,12);layout.addView(title);
-        TextView note=new TextView(this);
-        note.setText("Beta: controlador do servidor existente no Termux/Debian, ainda não é APK independente.");
-        layout.addView(note);
-        status=new TextView(this);status.setTextSize(17);status.setPadding(0,20,0,18);layout.addView(status);
-        hostname=new EditText(this);hostname.setSingleLine(true);hostname.setHint("Hostname Tailscale (opcional)");
-        hostname.setText(getSharedPreferences("poi",MODE_PRIVATE).getString("hostname",""));layout.addView(hostname);
-        button(layout,"Salvar hostname",()->{
-            String host=hostname.getText().toString().trim();
-            if(!host.isEmpty()&&!host.matches("[A-Za-z0-9][A-Za-z0-9-]{0,62}")){
-                Toast.makeText(this,"Hostname inválido",Toast.LENGTH_LONG).show();return;
+    private Button authorize;
+    private Button openVpn;
+    private String authorizeUrl = "";
+    private String vpnUrl = "";
+
+    @Override public void onCreate(Bundle savedState) {
+        super.onCreate(savedState);
+        preferences = ServerService.preferences(this);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        int padding = Math.round(20 * getResources().getDisplayMetrics().density);
+        page.setPadding(padding, padding, padding, padding);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(page);
+        setContentView(scroll);
+
+        TextView title = new TextView(this);
+        title.setText("POI Server");
+        title.setTextSize(26);
+        page.addView(title);
+        status = new TextView(this);
+        status.setTextSize(16);
+        status.setPadding(0, padding, 0, padding);
+        page.addView(status);
+
+        button(page, "Iniciar servidor", () -> {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
             }
-            getSharedPreferences("poi",MODE_PRIVATE).edit().putString("hostname",host).apply();
-            Toast.makeText(this,"Salvo. Reinicie o servidor para aplicar.",Toast.LENGTH_LONG).show();
-        });
-        button(layout,"Iniciar e manter ativo",()->{
-            if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
-                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},32);
             ServerService.start(this);
         });
-        button(layout,"Parar monitoramento",()->ServerService.stop(this));
-        button(layout,"Abrir painel local",()->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("http://127.0.0.1:8080"))));
-        button(layout,"Autorizar comandos no Termux",()->requestPermissions(new String[]{"com.termux.permission.RUN_COMMAND"},33));
-        button(layout,"Configurar economia de bateria",()->startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)));
-        TextView guide=new TextView(this);
-        guide.setText("\nConfiguração inicial:\n1. Mantenha a instalação Android Lite já funcional no Termux.\n2. Ative allow-external-apps=true em ~/.termux/termux.properties e execute termux-reload-settings.\n3. Conceda a permissão do Termux acima.\n4. Habilite autostart e bateria sem restrições para ambos os aplicativos no MIUI.\n5. Toque Iniciar. O monitor continuará com a tela apagada e tentará reiniciar após o boot.\n\nO botão Parar interrompe apenas o monitoramento, não a gravação em andamento no Termux.");
-        layout.addView(guide);
+        button(page, "Parar servidor", () -> ServerService.stop(this));
+        button(page, "Abrir POI neste aparelho", () -> browse(ServerService.LOCAL_URL));
+
+        TextView vpnLabel = new TextView(this);
+        vpnLabel.setText("Acesso via Tailscale");
+        vpnLabel.setTextSize(18);
+        vpnLabel.setPadding(0, padding, 0, 0);
+        page.addView(vpnLabel);
+        hostname = new EditText(this);
+        hostname.setSingleLine(true);
+        hostname.setHint("Nome na VPN, ex.: poi-redmi-apk");
+        hostname.setText(preferences.getString("hostname", ""));
+        page.addView(hostname);
+        button(page, "Salvar nome na VPN", () -> {
+            String name = hostname.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!name.isEmpty() && !name.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")) {
+                Toast.makeText(this, "Use letras, números e hífens no nome.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            preferences.edit().putString("hostname", name).apply();
+            Toast.makeText(this, name.isEmpty() ? "Acesso pela VPN desativado." :
+                "Nome salvo. Inicie o servidor para conectar.", Toast.LENGTH_SHORT).show();
+        });
+        authorize = button(page, "Autorizar no Tailscale", () -> browse(authorizeUrl));
+        openVpn = button(page, "Abrir endereço HTTPS", () -> browse(vpnUrl));
     }
-    private void button(LinearLayout l,String s,Runnable r){
-        Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(v->r.run());l.addView(b);
+
+    private Button button(LinearLayout page, String text, Runnable action) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setOnClickListener(view -> action.run());
+        page.addView(button);
+        return button;
     }
-    private final Runnable refresh=new Runnable(){
-        @Override public void run(){
-            io.execute(()->{
-                boolean online=ServerService.healthy();
-                boolean enabled=getSharedPreferences("poi",MODE_PRIVATE).getBoolean("enabled",false);
-                String detail=getSharedPreferences("poi",MODE_PRIVATE).getString("status","");
-                runOnUiThread(()->status.setText((online?"Servidor online":"Servidor offline")+
-                    "\nMonitoramento: "+(enabled?"ativado":"desativado")+"\n"+detail));
-            });
-            ui.postDelayed(this,6000);
+
+    private void browse(String address) {
+        if (address.isEmpty()) return;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(address)));
+        } catch (ActivityNotFoundException exception) {
+            Toast.makeText(this, "Instale um navegador para abrir o site.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private final Runnable update = new Runnable() {
+        @Override public void run() {
+            boolean enabled = preferences.getBoolean("enabled", false);
+            status.setText(enabled ? preferences.getString("status", "Iniciando servidor…") + "\nInicia ao ligar o aparelho."
+                : "Servidor parado.");
+            authorizeUrl = "";
+            vpnUrl = "";
+            String name = preferences.getString("hostname", "");
+            if (enabled && !name.isEmpty()) {
+                File state = new File(ServerService.vpnState(MainActivity.this, name), "status.json");
+                try {
+                    JSONObject data = new JSONObject(new String(Files.readAllBytes(state.toPath()), StandardCharsets.UTF_8));
+                    String login = data.optString("login");
+                    String https = data.optString("https");
+                    if (login.startsWith("https://login.tailscale.com/")) authorizeUrl = login;
+                    if (https.startsWith("https://") && https.endsWith(".ts.net")) vpnUrl = https;
+                } catch (Exception ignored) {
+                    // The VPN writes this file after connecting or when it needs authorization.
+                }
+            }
+            authorize.setEnabled(!authorizeUrl.isEmpty());
+            openVpn.setEnabled(!vpnUrl.isEmpty());
+            if (!vpnUrl.isEmpty()) status.append("\n" + vpnUrl);
+            handler.postDelayed(this, 1500);
         }
     };
-    @Override protected void onResume(){super.onResume();ui.removeCallbacks(refresh);ui.post(refresh);}
-    @Override protected void onPause(){ui.removeCallbacks(refresh);super.onPause();}
-    @Override protected void onDestroy(){io.shutdownNow();super.onDestroy();}
+
+    @Override protected void onResume() {
+        super.onResume();
+        handler.post(update);
+    }
+
+    @Override protected void onPause() {
+        handler.removeCallbacks(update);
+        super.onPause();
+    }
 }

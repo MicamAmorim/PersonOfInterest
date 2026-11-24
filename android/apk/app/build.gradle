@@ -1,16 +1,70 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+def repo = rootProject.file('../..')
+def apkPython = layout.buildDirectory.dir('generated/poiPython')
+def apkAssets = layout.buildDirectory.dir('generated/poiAssets')
+
+def copyBackend = tasks.register('copyPoiBackend', Sync) {
+    from("$repo/backend/app") {
+        include '__init__.py', 'camera_models.py', 'config.py', 'db.py', 'discovery.py',
+                'go2rtc.py', 'main_lite.py', 'storage_recording.py'
+        into 'app'
+    }
+    into apkPython
+}
+
+def copyFrontend = tasks.register('copyPoiFrontend', Sync) {
+    from("$repo/frontend") {
+        include 'lite.html', 'lite.js', 'lite.css', 'lite-sw.js', 'styles.css', 'icon.svg',
+                'manifest.webmanifest', 'v54-pwa.css', 'v54-pwa.js'
+        into 'poiWeb'
+    }
+    into apkAssets
+}
+
 android {
     namespace 'com.micamamorim.poiserver'
     compileSdk 35
     defaultConfig {
-        applicationId 'com.micamamorim.poiserver'
+        applicationId 'com.micamamorim.poiserver.standalone'
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName '0.1.0-beta'
+        versionName '0.1.0'
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    sourceSets.main {
+        assets.srcDir(apkAssets)
+        jniLibs.srcDir(layout.buildDirectory.dir('generated/poiNative'))
+    }
+    packaging.jniLibs {
+        useLegacyPackaging = true
+        keepDebugSymbols += ['**/libpoi_*.so']
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = '3.11'
+        if (project.hasProperty('poiBuildPython')) buildPython(project.property('poiBuildPython'))
+        pip {
+            options('--only-binary', ':all:')
+            install('-r', file('requirements-android.txt').absolutePath)
+        }
+    }
+    sourceSets.getByName('main') { srcDir(apkPython) }
+}
+
+tasks.configureEach {
+    if ((name.startsWith('merge') && name.endsWith('Assets')) || name.toLowerCase(Locale.ROOT).contains('lint')) {
+        dependsOn(copyFrontend)
+    }
+    if (name.startsWith('merge') && name.endsWith('PythonSources')) dependsOn(copyBackend)
 }

@@ -24,7 +24,7 @@ from starlette.requests import HTTPConnection
 from . import discovery, go2rtc
 from .config import APP_NAME, APP_VERSION, DATA_DIR, FRONTEND_DIR, GO2RTC_API_URL
 from .db import connection, init_db, utc_now
-from .models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest
+from .camera_models import CameraCreate, CameraOut, CameraUpdate, DiscoveryProbeRequest
 from .storage_recording import RecorderManager, ensure_schema
 
 
@@ -113,6 +113,12 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan, openapi_url=None)
+
+
+def provided_fields(payload: BaseModel) -> dict:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump(exclude_none=True)
+    return payload.dict(exclude_none=True)
 
 
 def same_origin(client: HTTPConnection) -> bool:
@@ -219,7 +225,7 @@ async def create_camera(payload: CameraCreate) -> CameraOut:
 async def update_camera(camera_id: int, payload: CameraUpdate) -> CameraOut:
     async with camera_write_lock:
         row = camera_row(camera_id)
-        values = payload.model_dump(exclude_none=True)
+        values = provided_fields(payload)
         if not values:
             return camera_output(row)
         now = utc_now()
@@ -254,7 +260,7 @@ def recording_settings() -> list[dict]:
 @app.patch("/api/recording/settings/{camera_id}")
 def set_recording_settings(camera_id: int, payload: RecordingSettings) -> dict:
     camera_row(camera_id)
-    values = payload.model_dump(exclude_none=True)
+    values = provided_fields(payload)
     if "segment_duration_value" in values:
         values["segment_duration_unit"] = "minutes"
     return recorder.update_camera_settings(camera_id, values)

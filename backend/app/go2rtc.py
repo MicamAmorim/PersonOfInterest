@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -71,7 +72,8 @@ def talkback_stream_name(stream_name: str) -> str:
 
 
 def local_restream_url(stream_name: str) -> str:
-    return f"rtsp://127.0.0.1:8554/{urllib.parse.quote(stream_name, safe='')}"
+    port = os.getenv("POI_RESTREAM_PORT", "8554")
+    return f"rtsp://127.0.0.1:{port}/{urllib.parse.quote(stream_name, safe='')}"
 
 
 def dvrip_backchannel_url(rtsp_url: str) -> str | None:
