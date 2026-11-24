@@ -116,8 +116,8 @@ if ($LASTEXITCODE -ne 0) {
   & $ghExe auth login --hostname github.com --web
   Assert-Exit "Autenticacao no GitHub"
 }
-$commit = (& git -C $root rev-parse feature/android-apk-controller)
-Assert-Exit "Git branch feature/android-apk-controller"
+$commit = (& git -C $root rev-parse HEAD)
+Assert-Exit "Git HEAD"
 $short = $commit.Substring(0,7)
 $tag = "android-controller-beta-$short"
 $assetWithName = "$asset#POI-Server-Android-Controller-beta.apk"
