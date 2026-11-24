@@ -40,6 +40,7 @@ class DiscoveryTests(unittest.TestCase):
 class LiteDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_lite_finds_slow_cameras_without_scanning_auxiliary_ports_on_every_host(self):
         responders = {"192.168.1.32": (80, 554), "192.168.1.150": (554, 8899), "192.168.1.151": (554, 8899)}
+        answered = set()
         active = peak = 0
 
         async def port_open(ip, port, timeout):
@@ -49,7 +50,11 @@ class LiteDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             active -= 1
             if port in discovery.CAMERA_PORTS:
-                return timeout >= 2.0 and port in responders.get(ip, ())
+                self.assertNotIn((ip, port), answered)
+                if port in responders.get(ip, ()) and (ip == "192.168.1.32" or timeout >= 2.0):
+                    answered.add((ip, port))
+                    return True
+                return False
             self.assertIn(ip, responders)
             return port in responders[ip]
 
