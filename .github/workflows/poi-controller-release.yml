@@ -1,0 +1,41 @@
+name: Build POI Android Controller Beta
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/poi-controller-release.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android-beta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/android-apk-controller
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Compile installable APK
+        run: gradle -p android/apk :app:assembleDebug --no-daemon
+      - run: cp android/apk/app/build/outputs/apk/debug/app-debug.apk POI-Server-Android-Controller-beta.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: POI-Android-Controller-beta
+          path: POI-Server-Android-Controller-beta.apk
+          if-no-files-found: error
+      - name: Publish beta prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="android-controller-beta-$(git rev-parse --short HEAD)"
+          gh release create "$TAG" POI-Server-Android-Controller-beta.apk \
+            --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse HEAD)" \
+            --title "POI Server Android controller beta" --prerelease \
+            --notes "Experimental Android APK controller. REQUIRES existing Termux/Debian Android Lite backend and RUN_COMMAND permission; NOT a standalone native Android server. Debug-signed beta for testing only. See android/apk/README.md."
