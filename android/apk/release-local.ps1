@@ -96,7 +96,19 @@ if ($BuildOnly) { Write-Host "BuildOnly: Release nao criada."; exit 0 }
 $gh = Get-Command gh -ErrorAction SilentlyContinue
 $ghExe = if ($null -ne $gh) { $gh.Source } else { Join-Path $env:ProgramFiles "GitHub CLI\gh.exe" }
 if (!(Test-Path $ghExe)) {
-  throw "Instale GitHub CLI em https://cli.github.com/ e execute novamente. APK ja gerado: $asset"
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if ($null -ne $winget) {
+    Write-Host "Instalando GitHub CLI sem depender de Actions..."
+    & $winget.Source install --id GitHub.cli --exact --source winget --accept-package-agreements --accept-source-agreements
+    Assert-Exit "Instalacao de GitHub CLI"
+    $foundGh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($null -ne $foundGh) { $ghExe = $foundGh.Source }
+    elseif (Test-Path (Join-Path $env:ProgramFiles "GitHub CLI\gh.exe")) { $ghExe = Join-Path $env:ProgramFiles "GitHub CLI\gh.exe" }
+    elseif (Test-Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\gh.exe")) { $ghExe = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\gh.exe" }
+  }
+}
+if (!(Test-Path $ghExe)) {
+  throw "GitHub CLI indisponivel. Instale em https://cli.github.com/ e execute novamente. O APK foi compilado em $asset"
 }
 & $ghExe auth status --hostname github.com
 if ($LASTEXITCODE -ne 0) {
