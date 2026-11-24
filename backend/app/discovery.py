@@ -97,19 +97,24 @@ async def scan_local_network(
     semaphore = asyncio.Semaphore(64 if prioritize_camera_ports else 160)
     open_by_ip: dict[str, list[int]] = {}
 
-    async def scan_ports(hosts: list[str], ports: tuple[int, ...], timeout: float) -> None:
+    async def scan_ports(hosts: list[str], ports: tuple[int, ...], timeout: float, start_interval: float = 0) -> None:
         async def scan_port(ip: str, port: int) -> None:
             async with semaphore:
                 opened = await _port_open(ip, port, timeout)
             if opened:
                 open_by_ip.setdefault(ip, []).append(port)
 
-        await asyncio.gather(*(scan_port(host, port) for host in hosts for port in ports))
+        async def scan_host(index: int, host: str) -> None:
+            if start_interval and index:
+                await asyncio.sleep(start_interval * index)
+            await asyncio.gather(*(scan_port(host, port) for port in ports))
+
+        await asyncio.gather(*(scan_host(index, host) for index, host in enumerate(hosts)))
 
     hosts = [str(host) for host in network.hosts() if str(host) != local_ip]
     if prioritize_camera_ports:
-        # A first connection on Wi-Fi may wait for address resolution or a retransmission.
-        await scan_ports(hosts, CAMERA_PORTS, 1.5)
+        # Space out the first connections to new addresses so Wi-Fi can resolve them.
+        await scan_ports(hosts, CAMERA_PORTS, 2.6, start_interval=0.012)
         auxiliary_ports = tuple(port for port in DISCOVERY_PORTS if port not in CAMERA_PORTS)
         await scan_ports(list(open_by_ip), auxiliary_ports, 0.4)
     else:

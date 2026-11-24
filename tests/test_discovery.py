@@ -49,7 +49,7 @@ class LiteDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             active -= 1
             if port in discovery.CAMERA_PORTS:
-                return timeout >= 1.0 and port in responders.get(ip, ())
+                return timeout >= 2.0 and port in responders.get(ip, ())
             self.assertIn(ip, responders)
             return port in responders[ip]
 
