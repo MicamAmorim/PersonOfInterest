@@ -36,7 +36,19 @@ build_go() {
   cd -- "$cache/go2rtc-v1.9.15"
   "$go" build -trimpath -p "$jobs" -buildmode=pie -ldflags "$ld -checklinkname=0" -o "$out/$abi/libpoi_go2rtc.so" .
   cd -- "$source_dir/vpn"
-  "$go" build -trimpath -p "$jobs" -mod=readonly -buildmode=pie -ldflags "$ld" -o "$out/$abi/libpoi_vpn.so" .
+  "$go" build -trimpath -p "$jobs" -mod=readonly -modfile="$cache/poi-acme/poi.mod" \
+    -buildmode=pie -ldflags "$ld" -o "$out/$abi/libpoi_vpn.so" .
+}
+
+prepare_acme() {
+  cd -- "$source_dir/vpn"
+  # Tailscale excludes its ACME endpoint on standard Android clients. Include it only
+  # in this embedded userspace server so browsers can validate the tailnet hostname.
+  local acme="$cache/poi-acme"
+  "$go" mod download -json tailscale.com | python3 "$source_dir/android-acme.py" "$acme"
+  cp go.mod "$acme/poi.mod"
+  cp go.sum "$acme/poi.sum"
+  "$go" mod edit -modfile="$acme/poi.mod" -replace "tailscale.com=$acme/tailscale"
 }
 
 case "${1:?Informe ffmpeg ou go}" in
@@ -45,6 +57,7 @@ case "${1:?Informe ffmpeg ou go}" in
     build_media arm64-v8a aarch64 aarch64-linux-android26-clang
     ;;
   go)
+    prepare_acme
     build_go armeabi-v7a arm armv7a-linux-androideabi26-clang
     build_go arm64-v8a arm64 aarch64-linux-android26-clang
     ;;

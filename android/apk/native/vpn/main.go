@@ -29,11 +29,16 @@ func writeStatus(dir string, state status) error {
 	if err != nil {
 		return err
 	}
-	temp := filepath.Join(dir, "status.tmp")
-	if err := os.WriteFile(temp, data, 0600); err != nil {
+	temp, err := os.CreateTemp(dir, ".status-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(temp, filepath.Join(dir, "status.json"))
+	defer os.Remove(temp.Name())
+	_, writeErr := temp.Write(data)
+	if closeErr := temp.Close(); writeErr != nil || closeErr != nil {
+		return errors.Join(writeErr, closeErr)
+	}
+	return os.Rename(temp.Name(), filepath.Join(dir, "status.json"))
 }
 
 func run() error {
@@ -59,22 +64,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	loginCtx, stopLogin := context.WithCancel(ctx)
+	defer stopLogin()
+	loginDone := make(chan struct{})
 	go func() {
+		defer close(loginDone)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
-			state, err := client.StatusWithoutPeers(ctx)
+			state, err := client.StatusWithoutPeers(loginCtx)
 			if err == nil && state.AuthURL != "" {
 				_ = writeStatus(*dir, status{Login: state.AuthURL})
 			}
 			select {
 			case <-ticker.C:
-			case <-ctx.Done():
+			case <-loginCtx.Done():
 				return
 			}
 		}
 	}()
 	ready, err := node.Up(ctx)
+	stopLogin()
+	<-loginDone
 	if err != nil {
 		return err
 	}
